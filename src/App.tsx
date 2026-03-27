@@ -38,27 +38,23 @@ function EditorShell() {
   const { state, dispatch } = useEqEditor()
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
-  const eqCurve = useMemo(() => {
-    if (state.curve.length === 0) {
-      return []
-    }
+  const bandCurve = useMemo(
+    () =>
+      computeEqCurve(
+        state.bands,
+        state.baselineCurve.map((point) => point.frequencyHz),
+      ),
+    [state.bands, state.baselineCurve],
+  )
 
-    return computeEqCurve(
-      state.bands,
-      state.curve.map((point) => point.frequencyHz),
-    )
-  }, [state.bands, state.curve])
-
-  const adjustedCurve = useMemo(() => {
-    if (state.curve.length === 0 || eqCurve.length === 0) {
-      return []
-    }
-    return sumCurveWithEq(state.curve, eqCurve)
-  }, [eqCurve, state.curve])
+  const outputCurve = useMemo(
+    () => sumCurveWithEq(state.baselineCurve, bandCurve),
+    [bandCurve, state.baselineCurve],
+  )
 
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
-  const canSavePreset = state.curve.length > 0 || state.bands.length > 0
-  const canExportCurve = state.curve.length > 0
+  const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
+  const canExportCurve = outputCurve.length > 0
   const preset = useMemo<ProjectPresetV1>(
     () => ({
       version: 1,
@@ -69,7 +65,7 @@ function EditorShell() {
   )
 
   function getBaseFileName() {
-    const sourceName = state.sourceFileName ?? 'curve'
+    const sourceName = state.sourceFileName ?? 'flat-eq'
     return sourceName.replace(/\.csv$/i, '')
   }
 
@@ -150,7 +146,7 @@ function EditorShell() {
       const text = await file.text()
       const curve = parseCurveCsv(text)
       dispatch({ type: 'set-source-file-name', payload: file.name })
-      dispatch({ type: 'set-curve', payload: curve })
+      dispatch({ type: 'set-baseline-curve', payload: curve })
       dispatch({ type: 'set-error', payload: undefined })
     } catch (error) {
       const message =
@@ -191,7 +187,7 @@ function EditorShell() {
       const result = await saveTextFile({
         suggestedName: `${getBaseFileName()}-eq.csv`,
         mimeType: 'text/csv',
-        contents: serializeCurveCsv(eqCurve),
+        contents: serializeCurveCsv(outputCurve),
         handle: exportHandleRef.current,
       })
       exportHandleRef.current = result.handle
@@ -321,7 +317,7 @@ function EditorShell() {
               </article>
               <article>
                 <span>Points</span>
-                <strong>{state.curve.length}</strong>
+                <strong>{state.baselineCurve.length}</strong>
               </article>
               <article>
                 <span>Bands</span>
@@ -330,10 +326,10 @@ function EditorShell() {
               <article>
                 <span>EQ peak</span>
                 <strong>
-                  {eqCurve.length === 0
+                  {bandCurve.length === 0
                     ? '0.0 dB'
                     : formatDb(
-                        Math.max(...eqCurve.map((point) => point.gainDb)),
+                        Math.max(...bandCurve.map((point) => point.gainDb)),
                       )}
                 </strong>
               </article>
@@ -343,9 +339,9 @@ function EditorShell() {
           <section className="panel-section">
             <p className="section-label">Workflow</p>
             <ol className="workflow-list">
-              <li>Import a CSV with frequency and gain columns.</li>
+              <li>Import an EQ curve or start from flat immediately.</li>
               <li>Create parametric bands and shape the response.</li>
-              <li>Save the preset with Ctrl+S and export the EQ curve.</li>
+              <li>Save the preset with Ctrl+S and export the final EQ curve.</li>
             </ol>
           </section>
 
@@ -368,62 +364,48 @@ function EditorShell() {
           <div className="stage-header">
             <div>
               <p className="section-label">Graph</p>
-              <h2>Frequency response editor</h2>
+              <h2>EQ curve editor</h2>
             </div>
             <div className="legend">
-              <span className="legend-item legend-source">Source</span>
-              <span className="legend-item legend-eq">EQ sum</span>
-              <span className="legend-item legend-preview">Adjusted</span>
+              <span className="legend-item legend-source">Baseline</span>
+              <span className="legend-item legend-eq">Param EQ</span>
+              <span className="legend-item legend-preview">Output</span>
             </div>
           </div>
 
-          {state.curve.length === 0 ? (
-            <div className="chart-placeholder" aria-label="EQ chart placeholder">
-              <div className="grid-lines" aria-hidden="true" />
-              <div className="placeholder-copy">
-                <p className="section-label">Awaiting data</p>
-                <h3>Import a headphone response CSV to begin editing</h3>
-                <p>
-                  The editor will render the source curve, summed EQ response
-                  and adjusted preview here.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <EqChart
-              sourceCurve={state.curve}
-              eqCurve={eqCurve}
-              adjustedCurve={adjustedCurve}
-              bands={state.bands}
-              selectedBandId={state.selectedBandId}
-              onBandChange={(bandId, nextValues) => {
-                const band = state.bands.find((entry) => entry.id === bandId)
-                if (!band) {
-                  return
-                }
+          <EqChart
+            sourceCurve={state.baselineCurve}
+            eqCurve={bandCurve}
+            adjustedCurve={outputCurve}
+            bands={state.bands}
+            selectedBandId={state.selectedBandId}
+            onBandChange={(bandId, nextValues) => {
+              const band = state.bands.find((entry) => entry.id === bandId)
+              if (!band) {
+                return
+              }
 
-                if ('gainDb' in band) {
-                  updateBand({
-                    ...band,
-                    frequencyHz: clampFrequency(nextValues.frequencyHz),
-                    gainDb:
-                      nextValues.gainDb === undefined
-                        ? band.gainDb
-                        : Math.max(-24, Math.min(24, nextValues.gainDb)),
-                  })
-                  return
-                }
-
+              if ('gainDb' in band) {
                 updateBand({
                   ...band,
                   frequencyHz: clampFrequency(nextValues.frequencyHz),
+                  gainDb:
+                    nextValues.gainDb === undefined
+                      ? band.gainDb
+                      : Math.max(-24, Math.min(24, nextValues.gainDb)),
                 })
-              }}
-              onBandSelect={(bandId) =>
-                dispatch({ type: 'select-band', payload: { id: bandId } })
+                return
               }
-            />
-          )}
+
+              updateBand({
+                ...band,
+                frequencyHz: clampFrequency(nextValues.frequencyHz),
+              })
+            }}
+            onBandSelect={(bandId) =>
+              dispatch({ type: 'select-band', payload: { id: bandId } })
+            }
+          />
         </section>
 
         <aside className="panel panel-right">

@@ -1,3 +1,4 @@
+import { sumCurves } from './curve'
 import type { CurvePoint, EqBand } from '../types'
 
 const MAGNITUDE_FLOOR = 1e-8
@@ -113,12 +114,6 @@ export function computeEqCurve(
   }, frequencies.map((frequencyHz) => ({ frequencyHz, gainDb: 0 })))
 }
 
-export function sumCurveWithEq(
-  sourceCurve: CurvePoint[],
-  eqCurve: CurvePoint[],
-): CurvePoint[] {
-  return sourceCurve.map((point, index) => ({
-    frequencyHz: point.frequencyHz,
-    gainDb: point.gainDb + (eqCurve[index]?.gainDb ?? 0),
-  }))
+export function sumCurveWithEq(baseCurve: CurvePoint[], eqCurve: CurvePoint[]) {
+  return sumCurves(baseCurve, eqCurve)
 }

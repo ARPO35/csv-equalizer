@@ -6,11 +6,12 @@ import {
   useMemo,
   useReducer,
 } from 'react'
+import { createFlatCurve } from './lib/curve'
 import type { CurvePoint, EqBand, EqEditorState } from './types'
 
 type EqEditorAction =
   | { type: 'set-source-file-name'; payload?: string }
-  | { type: 'set-curve'; payload: CurvePoint[] }
+  | { type: 'set-baseline-curve'; payload: CurvePoint[] }
   | { type: 'set-bands'; payload: EqBand[] }
   | { type: 'set-error'; payload?: string }
   | { type: 'add-band'; payload: EqBand }
@@ -20,7 +21,7 @@ type EqEditorAction =
 
 const initialState: EqEditorState = {
   sourceFileName: undefined,
-  curve: [],
+  baselineCurve: createFlatCurve(),
   bands: [],
   selectedBandId: undefined,
   errorMessage: undefined,
@@ -36,10 +37,10 @@ function eqEditorReducer(
         ...state,
         sourceFileName: action.payload,
       }
-    case 'set-curve':
+    case 'set-baseline-curve':
       return {
         ...state,
-        curve: action.payload,
+        baselineCurve: action.payload,
       }
     case 'set-bands':
       return {

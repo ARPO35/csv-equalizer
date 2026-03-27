@@ -36,7 +36,7 @@ export type ProjectPresetV1 = {
 
 export type EqEditorState = {
   sourceFileName?: string
-  curve: CurvePoint[]
+  baselineCurve: CurvePoint[]
   bands: EqBand[]
   selectedBandId?: string
   errorMessage?: string
