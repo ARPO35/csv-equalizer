@@ -26,6 +26,8 @@ export type CutBand = BaseBand & {
 
 export type EqBand = PeakingBand | ShelfBand | CutBand
 
+export type EqBandType = EqBand['type']
+
 export type ProjectPresetV1 = {
   version: 1
   sourceFileName?: string

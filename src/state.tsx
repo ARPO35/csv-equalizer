@@ -11,6 +11,7 @@ import type { CurvePoint, EqBand, EqEditorState } from './types'
 type EqEditorAction =
   | { type: 'set-source-file-name'; payload?: string }
   | { type: 'set-curve'; payload: CurvePoint[] }
+  | { type: 'set-bands'; payload: EqBand[] }
   | { type: 'set-error'; payload?: string }
   | { type: 'add-band'; payload: EqBand }
   | { type: 'update-band'; payload: EqBand }
@@ -39,6 +40,12 @@ function eqEditorReducer(
       return {
         ...state,
         curve: action.payload,
+      }
+    case 'set-bands':
+      return {
+        ...state,
+        bands: action.payload,
+        selectedBandId: action.payload[0]?.id,
       }
     case 'set-error':
       return {
