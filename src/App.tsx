@@ -8,6 +8,7 @@ import {
 } from 'react'
 import './App.css'
 import { EqChart } from './components/EqChart'
+import { useEqPlaybackMonitor } from './lib/audio-monitor'
 import { describeBand, sortBandsByFrequency } from './lib/bands'
 import { parseCurveCsv } from './lib/csv'
 import { computeEqCurve, sumCurveWithEq } from './lib/eq'
@@ -28,15 +29,23 @@ function getSelectedBand(bands: EqBand[], selectedBandId?: string) {
 }
 
 function EditorShell() {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const curveInputRef = useRef<HTMLInputElement | null>(null)
+  const audioInputRef = useRef<HTMLInputElement | null>(null)
   const presetHandleRef = useRef<FileSystemFileHandle | null>(null)
   const exportHandleRef = useRef<FileSystemFileHandle | null>(null)
+  const audioObjectUrlRef = useRef<string | null>(null)
   const { state, dispatch } = useEqEditor()
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const activeBands = useMemo(
     () => state.bands.filter((band) => !band.isBypassed),
     [state.bands],
   )
+  const { errorMessage: monitorErrorMessage } = useEqPlaybackMonitor({
+    audioElement,
+    bands: state.bands,
+    monitorBypassed: state.monitorBypassed,
+  })
 
   const bandCurve = useMemo(
     () =>
@@ -124,6 +133,23 @@ function EditorShell() {
     }
   }, [handleSaveShortcut])
 
+  useEffect(() => {
+    return () => {
+      if (audioObjectUrlRef.current) {
+        URL.revokeObjectURL(audioObjectUrlRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!audioElement || !audioObjectUrlRef.current) {
+      return
+    }
+
+    audioElement.src = audioObjectUrlRef.current
+    audioElement.load()
+  }, [audioElement])
+
   function updateBand(nextBand: EqBand) {
     dispatch({ type: 'update-band', payload: nextBand })
   }
@@ -137,7 +163,11 @@ function EditorShell() {
   }
 
   function handleImportClick() {
-    fileInputRef.current?.click()
+    curveInputRef.current?.click()
+  }
+
+  function handleAudioUploadClick() {
+    audioInputRef.current?.click()
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -160,6 +190,30 @@ function EditorShell() {
     } finally {
       event.target.value = ''
     }
+  }
+
+  async function handleAudioFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current)
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    audioObjectUrlRef.current = objectUrl
+    dispatch({ type: 'set-audio-file-name', payload: file.name })
+
+    if (audioElement) {
+      audioElement.src = objectUrl
+      audioElement.load()
+    }
+
+    setStatusMessage(`Loaded monitor audio from ${file.name}.`)
+    dispatch({ type: 'set-error', payload: undefined })
+    event.target.value = ''
   }
 
   async function handleSavePreset() {
@@ -222,11 +276,18 @@ function EditorShell() {
 
         <div className="topbar-actions">
           <input
-            ref={fileInputRef}
+            ref={curveInputRef}
             className="hidden-input"
             type="file"
             accept=".csv,text/csv"
             onChange={handleFileChange}
+          />
+          <input
+            ref={audioInputRef}
+            className="hidden-input"
+            type="file"
+            accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac"
+            onChange={handleAudioFileChange}
           />
           <button type="button" className="ghost-button" onClick={handleImportClick}>
             Import EQ CSV
@@ -252,6 +313,42 @@ function EditorShell() {
 
       <main className="workspace">
         <aside className="panel panel-left">
+          <section className="panel-section">
+            <p className="section-label">Monitor</p>
+            <div className="monitor-stack">
+              <div className="monitor-actions">
+                <button type="button" className="ghost-button" onClick={handleAudioUploadClick}>
+                  Upload audio
+                </button>
+                <button
+                  type="button"
+                  className={`chip-button ${state.monitorBypassed ? 'is-active' : ''}`}
+                  aria-pressed={state.monitorBypassed}
+                  disabled={!state.audioFileName}
+                  onClick={() => dispatch({ type: 'toggle-monitor-bypass' })}
+                >
+                  Monitor bypass
+                </button>
+              </div>
+
+              <div className="monitor-card">
+                <strong>{state.audioFileName ?? 'No monitor file loaded'}</strong>
+                <p>
+                  {state.audioFileName
+                    ? 'Play the file below to hear the current EQ in real time.'
+                    : 'Upload a local audio file to audition the current curve.'}
+                </p>
+              </div>
+
+              <audio
+                ref={setAudioElement}
+                className="monitor-player"
+                controls
+                preload="metadata"
+              />
+            </div>
+          </section>
+
           <section className="panel-section">
             <p className="section-label">Session</p>
             <div className="metric-grid">
@@ -287,6 +384,7 @@ function EditorShell() {
               <li>Double-click inside the graph to create a band.</li>
               <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q.</li>
               <li>Use Band bypass to A/B nodes without deleting them.</li>
+              <li>Upload a monitor file and use Monitor bypass to compare wet vs dry playback.</li>
               <li>Save the preset with Ctrl+S and export the final output EQ.</li>
             </ol>
           </section>
@@ -295,6 +393,13 @@ function EditorShell() {
             <section className="panel-section">
               <p className="section-label">Import status</p>
               <div className="status-box status-error">{state.errorMessage}</div>
+            </section>
+          ) : null}
+
+          {monitorErrorMessage ? (
+            <section className="panel-section">
+              <p className="section-label">Monitor status</p>
+              <div className="status-box status-error">{monitorErrorMessage}</div>
             </section>
           ) : null}
 
@@ -382,6 +487,7 @@ function EditorShell() {
               <li>Double-click node: delete that band.</li>
               <li>Double-click popover values: edit frequency, gain, Q or slope.</li>
               <li>Band bypass affects the graph, export and monitor chain.</li>
+              <li>Monitor bypass only affects playback.</li>
               <li>Drag a bell node and use the mouse wheel to adjust Q.</li>
               <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
               <li>`Delete` / `Backspace`: remove the selected band.</li>
