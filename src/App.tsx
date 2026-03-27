@@ -1,5 +1,7 @@
 import {
   type ChangeEvent,
+  useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
 } from 'react'
@@ -47,8 +49,47 @@ function EditorShell() {
 
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
 
+  const handleDeleteSelectedBand = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.key !== 'Delete' &&
+      event.key !== 'Backspace'
+    ) {
+      return
+    }
+
+    const activeElement = document.activeElement
+    if (
+      activeElement instanceof HTMLInputElement ||
+      activeElement instanceof HTMLSelectElement ||
+      activeElement instanceof HTMLTextAreaElement
+    ) {
+      return
+    }
+
+    if (!state.selectedBandId) {
+      return
+    }
+
+    event.preventDefault()
+    dispatch({
+      type: 'remove-band',
+      payload: { id: state.selectedBandId },
+    })
+  })
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleDeleteSelectedBand)
+    return () => {
+      window.removeEventListener('keydown', handleDeleteSelectedBand)
+    }
+  }, [handleDeleteSelectedBand])
+
   function updateBand(nextBand: EqBand) {
     dispatch({ type: 'update-band', payload: nextBand })
+  }
+
+  function handleRemoveBand(bandId: string) {
+    dispatch({ type: 'remove-band', payload: { id: bandId } })
   }
 
   function handleImportClick() {
@@ -252,6 +293,29 @@ function EditorShell() {
               adjustedCurve={adjustedCurve}
               bands={state.bands}
               selectedBandId={state.selectedBandId}
+              onBandChange={(bandId, nextValues) => {
+                const band = state.bands.find((entry) => entry.id === bandId)
+                if (!band) {
+                  return
+                }
+
+                if ('gainDb' in band) {
+                  updateBand({
+                    ...band,
+                    frequencyHz: clampFrequency(nextValues.frequencyHz),
+                    gainDb:
+                      nextValues.gainDb === undefined
+                        ? band.gainDb
+                        : Math.max(-24, Math.min(24, nextValues.gainDb)),
+                  })
+                  return
+                }
+
+                updateBand({
+                  ...band,
+                  frequencyHz: clampFrequency(nextValues.frequencyHz),
+                })
+              }}
               onBandSelect={(bandId) =>
                 dispatch({ type: 'select-band', payload: { id: bandId } })
               }
@@ -395,6 +459,14 @@ function EditorShell() {
                     </select>
                   </label>
                 ) : null}
+
+                <button
+                  type="button"
+                  className="ghost-button band-delete"
+                  onClick={() => handleRemoveBand(selectedBand.id)}
+                >
+                  Delete band
+                </button>
               </form>
             )}
           </section>

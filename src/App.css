@@ -234,6 +234,7 @@
   stroke: #ffb16c;
   stroke-width: 3;
   cursor: pointer;
+  touch-action: none;
   transition:
     transform 160ms ease,
     fill 160ms ease;
@@ -359,6 +360,10 @@
   color: #ffd0c8;
   border-color: rgba(255, 117, 89, 0.35);
   background: rgba(255, 117, 89, 0.08);
+}
+
+.band-delete {
+  margin-top: 0.35rem;
 }
 
 .ghost-button,
