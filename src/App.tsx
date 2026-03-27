@@ -8,7 +8,7 @@ import {
 } from 'react'
 import './App.css'
 import { EqChart } from './components/EqChart'
-import { createDefaultBand, describeBand, sortBandsByFrequency } from './lib/bands'
+import { describeBand, sortBandsByFrequency } from './lib/bands'
 import { parseCurveCsv } from './lib/csv'
 import { computeEqCurve, sumCurveWithEq } from './lib/eq'
 import {
@@ -17,14 +17,10 @@ import {
   serializePreset,
 } from './lib/files'
 import { EqEditorProvider, useEqEditor } from './state'
-import type { EqBand, EqBandType, ProjectPresetV1 } from './types'
+import type { EqBand, ProjectPresetV1 } from './types'
 
 function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
-}
-
-function clampFrequency(value: number) {
-  return Math.min(20_000, Math.max(20, value))
 }
 
 function getSelectedBand(bands: EqBand[], selectedBandId?: string) {
@@ -148,6 +144,7 @@ function EditorShell() {
       dispatch({ type: 'set-source-file-name', payload: file.name })
       dispatch({ type: 'set-baseline-curve', payload: curve })
       dispatch({ type: 'set-error', payload: undefined })
+      setStatusMessage(`Loaded baseline EQ from ${file.name}.`)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to parse CSV file.'
@@ -155,10 +152,6 @@ function EditorShell() {
     } finally {
       event.target.value = ''
     }
-  }
-
-  function handleAddBand() {
-    dispatch({ type: 'add-band', payload: createDefaultBand('peaking') })
   }
 
   async function handleSavePreset() {
@@ -203,75 +196,18 @@ function EditorShell() {
     }
   }
 
-  function handleBandTypeChange(nextType: EqBandType) {
-    if (!selectedBand) {
-      return
-    }
-
-    const nextBand = createDefaultBand(nextType, {
-      frequencyHz: selectedBand.frequencyHz,
-      gainDb: 'gainDb' in selectedBand ? selectedBand.gainDb : undefined,
-      id: selectedBand.id,
-    })
-
-    updateBand(nextBand)
-  }
-
-  function handleFieldChange(
-    field: 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct',
-    rawValue: string,
-  ) {
-    if (!selectedBand) {
-      return
-    }
-
-    const numericValue = Number(rawValue)
-    if (Number.isNaN(numericValue)) {
-      return
-    }
-
-    if (field === 'frequencyHz') {
-      updateBand({
-        ...selectedBand,
-        frequencyHz: clampFrequency(numericValue),
-      })
-      return
-    }
-
-    if (field === 'gainDb' && 'gainDb' in selectedBand) {
-      updateBand({
-        ...selectedBand,
-        gainDb: numericValue,
-      })
-      return
-    }
-
-    if (field === 'q' && selectedBand.type === 'peaking') {
-      updateBand({
-        ...selectedBand,
-        q: Math.max(0.1, numericValue),
-      })
-      return
-    }
-
-    if (field === 'slopeDbPerOct' && 'slopeDbPerOct' in selectedBand) {
-      updateBand({
-        ...selectedBand,
-        slopeDbPerOct: numericValue as 12 | 24 | 36 | 48,
-      })
-    }
-  }
+  const sortedBands = sortBandsByFrequency(state.bands)
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <p className="eyebrow">CSV headphone equalizer</p>
+          <p className="eyebrow">CSV parametric eq editor</p>
           <div>
             <h1>Curve Studio</h1>
             <p className="subtitle">
-              Parametric EQ editing for headphone response curves in a focused
-              desktop-style workspace.
+              Import a baseline EQ or start from flat, then shape the final
+              response directly on the graph in a Q3-style workflow.
             </p>
           </div>
         </div>
@@ -285,7 +221,7 @@ function EditorShell() {
             onChange={handleFileChange}
           />
           <button type="button" className="ghost-button" onClick={handleImportClick}>
-            Import CSV
+            Import EQ CSV
           </button>
           <button
             type="button"
@@ -301,7 +237,7 @@ function EditorShell() {
             disabled={!canExportCurve}
             onClick={() => void handleExportCurve()}
           >
-            Export curve
+            Export output
           </button>
         </div>
       </header>
@@ -312,11 +248,11 @@ function EditorShell() {
             <p className="section-label">Session</p>
             <div className="metric-grid">
               <article>
-                <span>Source</span>
-                <strong>{state.sourceFileName ?? 'No CSV loaded'}</strong>
+                <span>Baseline</span>
+                <strong>{state.sourceFileName ?? 'Flat 0 dB'}</strong>
               </article>
               <article>
-                <span>Points</span>
+                <span>Grid points</span>
                 <strong>{state.baselineCurve.length}</strong>
               </article>
               <article>
@@ -324,12 +260,12 @@ function EditorShell() {
                 <strong>{state.bands.length}</strong>
               </article>
               <article>
-                <span>EQ peak</span>
+                <span>Output peak</span>
                 <strong>
-                  {bandCurve.length === 0
+                  {outputCurve.length === 0
                     ? '0.0 dB'
                     : formatDb(
-                        Math.max(...bandCurve.map((point) => point.gainDb)),
+                        Math.max(...outputCurve.map((point) => point.gainDb)),
                       )}
                 </strong>
               </article>
@@ -339,9 +275,10 @@ function EditorShell() {
           <section className="panel-section">
             <p className="section-label">Workflow</p>
             <ol className="workflow-list">
-              <li>Import an EQ curve or start from flat immediately.</li>
-              <li>Create parametric bands and shape the response.</li>
-              <li>Save the preset with Ctrl+S and export the final EQ curve.</li>
+              <li>Import a baseline EQ or stay on the flat default curve.</li>
+              <li>Double-click inside the graph to create a band.</li>
+              <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q.</li>
+              <li>Save the preset with Ctrl+S and export the final output EQ.</li>
             </ol>
           </section>
 
@@ -364,7 +301,7 @@ function EditorShell() {
           <div className="stage-header">
             <div>
               <p className="section-label">Graph</p>
-              <h2>EQ curve editor</h2>
+              <h2>Q3-style EQ editor</h2>
             </div>
             <div className="legend">
               <span className="legend-item legend-source">Baseline</span>
@@ -374,185 +311,95 @@ function EditorShell() {
           </div>
 
           <EqChart
-            sourceCurve={state.baselineCurve}
-            eqCurve={bandCurve}
-            adjustedCurve={outputCurve}
+            baselineCurve={state.baselineCurve}
+            bandCurve={bandCurve}
+            outputCurve={outputCurve}
             bands={state.bands}
             selectedBandId={state.selectedBandId}
-            onBandChange={(bandId, nextValues) => {
-              const band = state.bands.find((entry) => entry.id === bandId)
-              if (!band) {
-                return
-              }
-
-              if ('gainDb' in band) {
-                updateBand({
-                  ...band,
-                  frequencyHz: clampFrequency(nextValues.frequencyHz),
-                  gainDb:
-                    nextValues.gainDb === undefined
-                      ? band.gainDb
-                      : Math.max(-24, Math.min(24, nextValues.gainDb)),
-                })
-                return
-              }
-
-              updateBand({
-                ...band,
-                frequencyHz: clampFrequency(nextValues.frequencyHz),
-              })
-            }}
+            showFlatHint={!state.sourceFileName}
+            onBandCommit={updateBand}
+            onBandCreate={(band) =>
+              dispatch({ type: 'add-band', payload: band })
+            }
+            onBandDelete={handleRemoveBand}
             onBandSelect={(bandId) =>
-              dispatch({ type: 'select-band', payload: { id: bandId } })
+              dispatch({
+                type: 'select-band',
+                payload: bandId ? { id: bandId } : undefined,
+              })
             }
           />
         </section>
 
         <aside className="panel panel-right">
           <section className="panel-section">
-            <div className="stack-header">
-              <div>
-                <p className="section-label">Bands</p>
-                <h2>Parametric stack</h2>
+            <p className="section-label">Overview</p>
+            <div className="info-stack">
+              <div className="inspector-card">
+                <h3>{state.sourceFileName ? 'Imported baseline' : 'Flat baseline'}</h3>
+                <p>
+                  {state.sourceFileName
+                    ? 'The imported EQ is preserved as the baseline. Nodes add a parametric delta on top of it.'
+                    : 'No import is required. The graph starts from a flat 0 dB baseline across the full working grid.'}
+                </p>
               </div>
-              <button type="button" className="ghost-button" onClick={handleAddBand}>
-                Add band
-              </button>
-            </div>
 
-            {state.bands.length === 0 ? (
-              <div className="empty-band-list">
-                <p>No filters yet.</p>
-                <span>
-                  Bell, shelves and cut filters will appear here after import.
-                </span>
+              <div className="inspector-card">
+                <h3>{selectedBand ? 'Selected band' : 'No band selected'}</h3>
+                {selectedBand ? (
+                  <p>
+                    {describeBand(selectedBand)} at{' '}
+                    {Math.round(selectedBand.frequencyHz)} Hz
+                    {'gainDb' in selectedBand
+                      ? `, ${formatDb(selectedBand.gainDb)}`
+                      : `, ${selectedBand.slopeDbPerOct} dB/oct`}
+                  </p>
+                ) : (
+                  <p>
+                    Hover or click a node to pin its floating editor. Double-click
+                    the graph to create the first band.
+                  </p>
+                )}
               </div>
-            ) : (
-              <div className="band-list">
-                {sortBandsByFrequency(state.bands).map((band, index) => (
-                  <button
-                    key={band.id}
-                    type="button"
-                    className={`band-item ${
-                      band.id === state.selectedBandId ? 'is-selected' : ''
-                    }`}
-                    onClick={() =>
-                      dispatch({ type: 'select-band', payload: { id: band.id } })
-                    }
-                  >
-                    <span className="band-index">{index + 1}</span>
-                    <div className="band-copy">
-                      <strong>{describeBand(band)}</strong>
-                      <span>{band.frequencyHz.toFixed(0)} Hz</span>
-                    </div>
-                    {'gainDb' in band ? (
-                      <span className="band-value">{formatDb(band.gainDb)}</span>
-                    ) : (
-                      <span className="band-value">{band.slopeDbPerOct} dB/oct</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
+            </div>
           </section>
 
           <section className="panel-section">
-            <p className="section-label">Inspector</p>
-            {!selectedBand ? (
+            <p className="section-label">Shortcuts</p>
+            <ul className="shortcut-list">
+              <li>Double-click graph: create a peaking band at the cursor.</li>
+              <li>Double-click node: delete that band.</li>
+              <li>Double-click popover values: edit frequency, gain, Q or slope.</li>
+              <li>Drag a bell node and use the mouse wheel to adjust Q.</li>
+              <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
+              <li>`Delete` / `Backspace`: remove the selected band.</li>
+            </ul>
+          </section>
+
+          <section className="panel-section">
+            <p className="section-label">Active stack</p>
+            {sortedBands.length === 0 ? (
               <div className="inspector-card">
-                <h3>Select a band</h3>
-                <p>
-                  The right panel will expose exact frequency, gain, Q and slope
-                  controls for the current filter.
-                </p>
+                <h3>No parametric bands yet</h3>
+                <p>The graph is editable. Add the first node with a double-click.</p>
               </div>
             ) : (
-              <form className="band-form" onSubmit={(event) => event.preventDefault()}>
-                <label>
-                  <span>Type</span>
-                  <select
-                    value={selectedBand.type}
-                    onChange={(event) =>
-                      handleBandTypeChange(event.target.value as EqBandType)
-                    }
-                  >
-                    <option value="peaking">Bell</option>
-                    <option value="lowShelf">Low shelf</option>
-                    <option value="highShelf">High shelf</option>
-                    <option value="lowCut">Low cut</option>
-                    <option value="highCut">High cut</option>
-                  </select>
-                </label>
-
-                <label>
-                  <span>Frequency (Hz)</span>
-                  <input
-                    type="number"
-                    min={20}
-                    max={20_000}
-                    step={1}
-                    value={selectedBand.frequencyHz}
-                    onChange={(event) =>
-                      handleFieldChange('frequencyHz', event.target.value)
-                    }
-                  />
-                </label>
-
-                {'gainDb' in selectedBand ? (
-                  <label>
-                    <span>Gain (dB)</span>
-                    <input
-                      type="number"
-                      min={-24}
-                      max={24}
-                      step={0.1}
-                      value={selectedBand.gainDb}
-                      onChange={(event) =>
-                        handleFieldChange('gainDb', event.target.value)
-                      }
-                    />
-                  </label>
-                ) : null}
-
-                {selectedBand.type === 'peaking' ? (
-                  <label>
-                    <span>Q</span>
-                    <input
-                      type="number"
-                      min={0.1}
-                      max={12}
-                      step={0.05}
-                      value={selectedBand.q}
-                      onChange={(event) => handleFieldChange('q', event.target.value)}
-                    />
-                  </label>
-                ) : null}
-
-                {'slopeDbPerOct' in selectedBand ? (
-                  <label>
-                    <span>Slope (dB/oct)</span>
-                    <select
-                      value={selectedBand.slopeDbPerOct}
-                      onChange={(event) =>
-                        handleFieldChange('slopeDbPerOct', event.target.value)
-                      }
-                    >
-                      <option value={12}>12</option>
-                      <option value={24}>24</option>
-                      <option value={36}>36</option>
-                      <option value={48}>48</option>
-                    </select>
-                  </label>
-                ) : null}
-
-                <button
-                  type="button"
-                  className="ghost-button band-delete"
-                  onClick={() => handleRemoveBand(selectedBand.id)}
-                >
-                  Delete band
-                </button>
-              </form>
+              <div className="readonly-band-list">
+                {sortedBands.map((band, index) => (
+                  <article key={band.id}>
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{describeBand(band)}</strong>
+                      <p>
+                        {Math.round(band.frequencyHz)} Hz
+                        {'gainDb' in band
+                          ? ` · ${formatDb(band.gainDb)}`
+                          : ` · ${band.slopeDbPerOct} dB/oct`}
+                      </p>
+                    </div>
+                  </article>
+                ))}
+              </div>
             )}
           </section>
         </aside>

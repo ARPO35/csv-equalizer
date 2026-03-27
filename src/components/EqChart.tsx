@@ -1,9 +1,16 @@
 import {
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
+  type WheelEvent,
+  useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
-import type { CurvePoint, EqBand } from '../types'
+import { convertBandType, createDefaultBand, describeBand } from '../lib/bands'
+import type { CurvePoint, EqBand, EqBandType } from '../types'
 
 const VIEWBOX_WIDTH = 1200
 const VIEWBOX_HEIGHT = 700
@@ -16,9 +23,26 @@ const PADDING = {
 const MIN_FREQUENCY = 20
 const MAX_FREQUENCY = 20_000
 const GRID_FREQUENCIES = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000]
+const MIN_Q = 0.1
+const MAX_Q = 12
+const WHEEL_Q_STEP = 0.05
+
+type EditableField = 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct'
 
 function formatFrequencyLabel(value: number) {
   return value >= 1_000 ? `${value / 1_000}k` : `${value}`
+}
+
+function formatFrequencyValue(value: number) {
+  return `${Math.round(value)} Hz`
+}
+
+function formatGainValue(value: number) {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
+}
+
+function formatQValue(value: number) {
+  return value.toFixed(2)
 }
 
 function createPath(points: CurvePoint[], minDb: number, maxDb: number) {
@@ -49,11 +73,11 @@ function getY(gainDb: number, minDb: number, maxDb: number) {
 }
 
 function getChartBounds(
-  sourceCurve: CurvePoint[],
-  eqCurve: CurvePoint[],
-  adjustedCurve: CurvePoint[],
+  baselineCurve: CurvePoint[],
+  bandCurve: CurvePoint[],
+  outputCurve: CurvePoint[],
 ) {
-  const values = [...sourceCurve, ...eqCurve, ...adjustedCurve].map((point) => point.gainDb)
+  const values = [...baselineCurve, ...bandCurve, ...outputCurve].map((point) => point.gainDb)
   const minValue = Math.min(...values, -12)
   const maxValue = Math.max(...values, 12)
   const padding = Math.max(3, (maxValue - minValue) * 0.12)
@@ -65,30 +89,131 @@ function getChartBounds(
   }
 }
 
+function clampFrequency(value: number) {
+  return Math.min(MAX_FREQUENCY, Math.max(MIN_FREQUENCY, value))
+}
+
+function clampGain(value: number) {
+  return Math.max(-24, Math.min(24, value))
+}
+
+function clampQ(value: number) {
+  return Math.max(MIN_Q, Math.min(MAX_Q, value))
+}
+
+function roundQ(value: number) {
+  return Number(value.toFixed(2))
+}
+
+function updateBandField(
+  band: EqBand,
+  field: EditableField,
+  rawValue: string,
+): EqBand | null {
+  const numericValue = Number(rawValue)
+  if (Number.isNaN(numericValue)) {
+    return null
+  }
+
+  if (field === 'frequencyHz') {
+    return {
+      ...band,
+      frequencyHz: clampFrequency(numericValue),
+    }
+  }
+
+  if (field === 'gainDb' && 'gainDb' in band) {
+    return {
+      ...band,
+      gainDb: clampGain(numericValue),
+    }
+  }
+
+  if (field === 'q' && band.type === 'peaking') {
+    return {
+      ...band,
+      q: clampQ(numericValue),
+    }
+  }
+
+  if (field === 'slopeDbPerOct' && 'slopeDbPerOct' in band) {
+    const nextSlope = [12, 24, 36, 48].includes(numericValue)
+      ? (numericValue as 12 | 24 | 36 | 48)
+      : band.slopeDbPerOct
+    return {
+      ...band,
+      slopeDbPerOct: nextSlope,
+    }
+  }
+
+  return null
+}
+
 export function EqChart({
-  sourceCurve,
-  eqCurve,
-  adjustedCurve,
+  baselineCurve,
+  bandCurve,
+  outputCurve,
   bands,
   selectedBandId,
-  onBandChange,
+  showFlatHint,
+  onBandCommit,
+  onBandCreate,
+  onBandDelete,
   onBandSelect,
 }: {
-  sourceCurve: CurvePoint[]
-  eqCurve: CurvePoint[]
-  adjustedCurve: CurvePoint[]
+  baselineCurve: CurvePoint[]
+  bandCurve: CurvePoint[]
+  outputCurve: CurvePoint[]
   bands: EqBand[]
   selectedBandId?: string
-  onBandChange: (
-    bandId: string,
-    nextValues: { frequencyHz: number; gainDb?: number },
-  ) => void
-  onBandSelect: (bandId: string) => void
+  showFlatHint: boolean
+  onBandCommit: (band: EqBand) => void
+  onBandCreate: (band: EqBand) => void
+  onBandDelete: (bandId: string) => void
+  onBandSelect: (bandId?: string) => void
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const hoverCloseTimerRef = useRef<number | null>(null)
   const [draggingBandId, setDraggingBandId] = useState<string | null>(null)
-  const { minDb, maxDb } = getChartBounds(sourceCurve, eqCurve, adjustedCurve)
+  const [hoveredBandId, setHoveredBandId] = useState<string | null>(null)
+  const [editingField, setEditingField] = useState<EditableField | null>(null)
+  const [editingDraft, setEditingDraft] = useState('')
+  const { minDb, maxDb } = getChartBounds(baselineCurve, bandCurve, outputCurve)
   const yLines = Array.from({ length: Math.floor((maxDb - minDb) / 6) + 1 }, (_, index) => maxDb - index * 6)
+
+  const popupBandId = hoveredBandId ?? selectedBandId
+  const popupBand = useMemo(
+    () => bands.find((band) => band.id === popupBandId),
+    [bands, popupBandId],
+  )
+  const draggingBand = useMemo(
+    () => bands.find((band) => band.id === draggingBandId),
+    [bands, draggingBandId],
+  )
+
+  useEffect(() => () => {
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current)
+    }
+  }, [])
+
+  function clearHoverTimer() {
+    if (hoverCloseTimerRef.current !== null) {
+      window.clearTimeout(hoverCloseTimerRef.current)
+      hoverCloseTimerRef.current = null
+    }
+  }
+
+  function scheduleHoverClose(bandId: string) {
+    if (bandId === selectedBandId) {
+      return
+    }
+
+    clearHoverTimer()
+    hoverCloseTimerRef.current = window.setTimeout(() => {
+      setHoveredBandId((current) => (current === bandId ? null : current))
+    }, 120)
+  }
 
   function getSvgPoint(clientX: number, clientY: number) {
     const svg = svgRef.current
@@ -139,20 +264,102 @@ export function EqChart({
       return
     }
 
-    onBandChange(band.id, {
-      frequencyHz: getFrequencyFromX(point.x),
-      gainDb: 'gainDb' in band ? getGainFromY(point.y) : undefined,
+    if ('gainDb' in band) {
+      onBandCommit({
+        ...band,
+        frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
+        gainDb: clampGain(getGainFromY(point.y)),
+      })
+      return
+    }
+
+    onBandCommit({
+      ...band,
+      frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
     })
   }
 
+  function handleChartWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!draggingBand || draggingBand.type !== 'peaking' || event.deltaY === 0) {
+      return
+    }
+
+    event.preventDefault()
+    const direction = event.deltaY < 0 ? 1 : -1
+    onBandCommit({
+      ...draggingBand,
+      q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
+    })
+  }
+
+  function startEditing(field: EditableField, value: string) {
+    setEditingField(field)
+    setEditingDraft(value)
+  }
+
+  function stopEditing() {
+    setEditingField(null)
+    setEditingDraft('')
+  }
+
+  function commitEditing() {
+    if (!popupBand || !editingField) {
+      stopEditing()
+      return
+    }
+
+    const nextBand = updateBandField(popupBand, editingField, editingDraft)
+    if (nextBand) {
+      onBandCommit(nextBand)
+    }
+    stopEditing()
+  }
+
+  function handleChartDoubleClick(event: MouseEvent<SVGSVGElement>) {
+    const target = event.target
+    if (
+      target instanceof Element &&
+      target instanceof SVGElement &&
+      target.tagName.toLowerCase() === 'circle'
+    ) {
+      return
+    }
+
+    const point = getSvgPoint(event.clientX, event.clientY)
+    if (!point) {
+      return
+    }
+
+    const band = createDefaultBand('peaking', {
+      frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
+      gainDb: clampGain(getGainFromY(point.y)),
+      q: 1,
+    })
+    onBandCreate(band)
+    onBandSelect(band.id)
+    setHoveredBandId(band.id)
+  }
+
+  const popupStyle = popupBand
+    ? {
+        left: `${(getX(popupBand.frequencyHz) / VIEWBOX_WIDTH) * 100}%`,
+        top: `${(getY('gainDb' in popupBand ? popupBand.gainDb : 0, minDb, maxDb) / VIEWBOX_HEIGHT) * 100}%`,
+      }
+    : undefined
+
+  const popupAlign = popupBand && getX(popupBand.frequencyHz) > VIEWBOX_WIDTH * 0.68
+    ? 'is-left'
+    : 'is-right'
+
   return (
-    <div className="chart-frame">
+    <div className="chart-frame" onWheel={handleChartWheel}>
       <svg
         ref={svgRef}
         className="chart-svg"
         viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
         role="img"
-        aria-label="Frequency response chart"
+        aria-label="EQ editing surface"
+        onDoubleClick={handleChartDoubleClick}
       >
         <rect
           x={PADDING.left}
@@ -198,28 +405,45 @@ export function EqChart({
           )
         })}
 
-        <path className="curve curve-source" d={createPath(sourceCurve, minDb, maxDb)} />
-        <path className="curve curve-eq" d={createPath(eqCurve, minDb, maxDb)} />
-        <path className="curve curve-preview" d={createPath(adjustedCurve, minDb, maxDb)} />
+        <path className="curve curve-source" d={createPath(baselineCurve, minDb, maxDb)} />
+        <path className="curve curve-eq" d={createPath(bandCurve, minDb, maxDb)} />
+        <path className="curve curve-preview" d={createPath(outputCurve, minDb, maxDb)} />
 
         {bands.map((band) => (
           <g key={band.id}>
             <circle
+              aria-label={`${describeBand(band)} band`}
               className={`band-node ${band.id === selectedBandId ? 'is-selected' : ''}`}
               cx={getX(band.frequencyHz)}
               cy={getY('gainDb' in band ? band.gainDb : 0, minDb, maxDb)}
-              r={band.id === selectedBandId ? 11 : 8}
+              r={band.id === selectedBandId ? 8 : 6}
+              onMouseEnter={() => {
+                clearHoverTimer()
+                setHoveredBandId(band.id)
+              }}
+              onMouseLeave={() => scheduleHoverClose(band.id)}
               onClick={() => onBandSelect(band.id)}
+              onDoubleClick={(event) => {
+                event.stopPropagation()
+                onBandDelete(band.id)
+              }}
               onPointerDown={(event) => {
                 onBandSelect(band.id)
+                clearHoverTimer()
+                setHoveredBandId(band.id)
                 setDraggingBandId(band.id)
-                event.currentTarget.setPointerCapture(event.pointerId)
+                if ('setPointerCapture' in event.currentTarget) {
+                  event.currentTarget.setPointerCapture(event.pointerId)
+                }
                 handlePointerMove(event, band)
               }}
               onPointerMove={(event) => handlePointerMove(event, band)}
               onPointerUp={(event) => {
                 setDraggingBandId(null)
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                if (
+                  'hasPointerCapture' in event.currentTarget &&
+                  event.currentTarget.hasPointerCapture(event.pointerId)
+                ) {
                   event.currentTarget.releasePointerCapture(event.pointerId)
                 }
               }}
@@ -228,6 +452,204 @@ export function EqChart({
           </g>
         ))}
       </svg>
+
+      {showFlatHint && bands.length === 0 ? (
+        <div className="chart-hint">
+          <p className="section-label">Flat start</p>
+          <h3>Import an EQ curve or double-click to start from flat</h3>
+          <p>The chart is already live. Double-click anywhere in the plot to create a peaking band.</p>
+        </div>
+      ) : null}
+
+      {popupBand ? (
+        <div
+          className={`band-popover ${popupAlign}`}
+          style={popupStyle}
+          onMouseEnter={() => {
+            clearHoverTimer()
+            setHoveredBandId(popupBand.id)
+          }}
+          onMouseLeave={() => {
+            if (popupBand.id !== selectedBandId) {
+              setHoveredBandId(null)
+            }
+          }}
+        >
+          <div className="band-popover-header">
+            <div>
+              <p className="section-label">Selected node</p>
+              <strong>{describeBand(popupBand)}</strong>
+            </div>
+            <button
+              type="button"
+              className="band-popover-close"
+              aria-label="Delete band"
+              onClick={() => onBandDelete(popupBand.id)}
+            >
+              ×
+            </button>
+          </div>
+
+          <label className="popover-row">
+            <span>Type</span>
+            <select
+              value={popupBand.type}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                onBandCommit(convertBandType(popupBand, event.target.value as EqBandType))
+              }
+            >
+              <option value="peaking">Bell</option>
+              <option value="lowShelf">Low shelf</option>
+              <option value="highShelf">High shelf</option>
+              <option value="lowCut">Low cut</option>
+              <option value="highCut">High cut</option>
+            </select>
+          </label>
+
+          <div className="popover-row">
+            <span>Frequency</span>
+            {editingField === 'frequencyHz' ? (
+              <input
+                aria-label="Frequency"
+                className="popover-input"
+                type="number"
+                autoFocus
+                value={editingDraft}
+                onChange={(event) => setEditingDraft(event.target.value)}
+                onBlur={commitEditing}
+                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                  if (event.key === 'Enter') {
+                    commitEditing()
+                  }
+                  if (event.key === 'Escape') {
+                    stopEditing()
+                  }
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                className="popover-value"
+                aria-label="Edit frequency"
+                onDoubleClick={() =>
+                  startEditing('frequencyHz', popupBand.frequencyHz.toFixed(0))
+                }
+              >
+                {formatFrequencyValue(popupBand.frequencyHz)}
+              </button>
+            )}
+          </div>
+
+          {'gainDb' in popupBand ? (
+            <div className="popover-row">
+              <span>Gain</span>
+              {editingField === 'gainDb' ? (
+                <input
+                  aria-label="Gain"
+                  className="popover-input"
+                  type="number"
+                  autoFocus
+                  step={0.1}
+                  value={editingDraft}
+                  onChange={(event) => setEditingDraft(event.target.value)}
+                  onBlur={commitEditing}
+                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                    if (event.key === 'Enter') {
+                      commitEditing()
+                    }
+                    if (event.key === 'Escape') {
+                      stopEditing()
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="popover-value"
+                  aria-label="Edit gain"
+                  onDoubleClick={() =>
+                    startEditing('gainDb', popupBand.gainDb.toFixed(1))
+                  }
+                >
+                  {formatGainValue(popupBand.gainDb)}
+                </button>
+              )}
+            </div>
+          ) : null}
+
+          {popupBand.type === 'peaking' ? (
+            <div className="popover-row">
+              <span>Q</span>
+              {editingField === 'q' ? (
+                <input
+                  aria-label="Q"
+                  className="popover-input"
+                  type="number"
+                  autoFocus
+                  step={0.05}
+                  value={editingDraft}
+                  onChange={(event) => setEditingDraft(event.target.value)}
+                  onBlur={commitEditing}
+                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                    if (event.key === 'Enter') {
+                      commitEditing()
+                    }
+                    if (event.key === 'Escape') {
+                      stopEditing()
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="popover-value"
+                  aria-label="Edit q"
+                  onDoubleClick={() => startEditing('q', popupBand.q.toFixed(2))}
+                >
+                  {formatQValue(popupBand.q)}
+                </button>
+              )}
+            </div>
+          ) : null}
+
+          {'slopeDbPerOct' in popupBand ? (
+            <div className="popover-row">
+              <span>Slope</span>
+              {editingField === 'slopeDbPerOct' ? (
+                <input
+                  aria-label="Slope"
+                  className="popover-input"
+                  type="number"
+                  autoFocus
+                  step={12}
+                  value={editingDraft}
+                  onChange={(event) => setEditingDraft(event.target.value)}
+                  onBlur={commitEditing}
+                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                    if (event.key === 'Enter') {
+                      commitEditing()
+                    }
+                    if (event.key === 'Escape') {
+                      stopEditing()
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="popover-value"
+                  aria-label="Edit slope"
+                  onDoubleClick={() =>
+                    startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())
+                  }
+                >
+                  {popupBand.slopeDbPerOct} dB/oct
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

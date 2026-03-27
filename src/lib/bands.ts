@@ -3,6 +3,7 @@ import type { EqBand, EqBandType } from '../types'
 type DefaultBandOptions = {
   frequencyHz?: number
   gainDb?: number
+  q?: number
   id?: string
 }
 
@@ -26,7 +27,7 @@ export function createDefaultBand(
         type,
         frequencyHz,
         gainDb: options.gainDb ?? 0,
-        q: 1,
+        q: options.q ?? 1,
       }
     case 'lowShelf':
     case 'highShelf':
@@ -64,4 +65,17 @@ export function describeBand(band: EqBand) {
     case 'highCut':
       return 'High cut'
   }
+}
+
+export function convertBandType(band: EqBand, nextType: EqBandType): EqBand {
+  if (band.type === nextType) {
+    return band
+  }
+
+  return createDefaultBand(nextType, {
+    id: band.id,
+    frequencyHz: band.frequencyHz,
+    gainDb: 'gainDb' in band ? band.gainDb : 0,
+    q: band.type === 'peaking' ? band.q : 1,
+  })
 }
