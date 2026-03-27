@@ -41,6 +41,7 @@ describe('EqChart', () => {
         onBandCommit={vi.fn()}
         onBandCreate={onBandCreate}
         onBandDelete={vi.fn()}
+        onBandToggleBypass={vi.fn()}
         onBandSelect={vi.fn()}
       />,
     )
@@ -61,6 +62,7 @@ describe('EqChart', () => {
       id: 'band-1',
       type: 'peaking',
       frequencyHz: 1000,
+      isBypassed: false,
       gainDb: 3,
       q: 1.1,
     }
@@ -76,6 +78,7 @@ describe('EqChart', () => {
         onBandCommit={vi.fn()}
         onBandCreate={vi.fn()}
         onBandDelete={onBandDelete}
+        onBandToggleBypass={vi.fn()}
         onBandSelect={vi.fn()}
       />,
     )
@@ -94,6 +97,7 @@ describe('EqChart', () => {
       id: 'band-1',
       type: 'peaking',
       frequencyHz: 1000,
+      isBypassed: false,
       gainDb: 3,
       q: 1.1,
     }
@@ -109,6 +113,7 @@ describe('EqChart', () => {
         onBandCommit={onBandCommit}
         onBandCreate={vi.fn()}
         onBandDelete={vi.fn()}
+        onBandToggleBypass={vi.fn()}
         onBandSelect={vi.fn()}
       />,
     )
@@ -131,6 +136,7 @@ describe('EqChart', () => {
       id: 'band-1',
       type: 'peaking',
       frequencyHz: 1000,
+      isBypassed: false,
       gainDb: 3,
       q: 1.1,
     }
@@ -146,6 +152,7 @@ describe('EqChart', () => {
         onBandCommit={onBandCommit}
         onBandCreate={vi.fn()}
         onBandDelete={vi.fn()}
+        onBandToggleBypass={vi.fn()}
         onBandSelect={vi.fn()}
       />,
     )
@@ -174,5 +181,37 @@ describe('EqChart', () => {
     onBandCommit.mockClear()
     fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
     expect(onBandCommit).not.toHaveBeenCalled()
+  })
+
+  it('toggles band bypass from the popover', async () => {
+    const user = userEvent.setup()
+    const onBandToggleBypass = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: true,
+      gainDb: 3,
+      q: 1.1,
+    }
+
+    render(
+      <EqChart
+        baselineCurve={baselineCurve}
+        bandCurve={createFlatCurve([20, 1000, 20000])}
+        outputCurve={baselineCurve}
+        bands={[band]}
+        selectedBandId={band.id}
+        showFlatHint={false}
+        onBandCommit={vi.fn()}
+        onBandCreate={vi.fn()}
+        onBandDelete={vi.fn()}
+        onBandToggleBypass={onBandToggleBypass}
+        onBandSelect={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Bypassed' }))
+    expect(onBandToggleBypass).toHaveBeenCalledWith('band-1')
   })
 })

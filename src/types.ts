@@ -6,6 +6,7 @@ export type CurvePoint = {
 type BaseBand = {
   id: string
   frequencyHz: number
+  isBypassed: boolean
 }
 
 export type PeakingBand = BaseBand & {
@@ -39,5 +40,7 @@ export type EqEditorState = {
   baselineCurve: CurvePoint[]
   bands: EqBand[]
   selectedBandId?: string
+  monitorBypassed: boolean
+  audioFileName?: string
   errorMessage?: string
 }

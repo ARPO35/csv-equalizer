@@ -11,11 +11,14 @@ import type { CurvePoint, EqBand, EqEditorState } from './types'
 
 type EqEditorAction =
   | { type: 'set-source-file-name'; payload?: string }
+  | { type: 'set-audio-file-name'; payload?: string }
   | { type: 'set-baseline-curve'; payload: CurvePoint[] }
   | { type: 'set-bands'; payload: EqBand[] }
   | { type: 'set-error'; payload?: string }
   | { type: 'add-band'; payload: EqBand }
   | { type: 'update-band'; payload: EqBand }
+  | { type: 'toggle-band-bypass'; payload: { id: string } }
+  | { type: 'toggle-monitor-bypass' }
   | { type: 'remove-band'; payload: { id: string } }
   | { type: 'select-band'; payload?: { id: string } }
 
@@ -24,6 +27,8 @@ const initialState: EqEditorState = {
   baselineCurve: createFlatCurve(),
   bands: [],
   selectedBandId: undefined,
+  monitorBypassed: false,
+  audioFileName: undefined,
   errorMessage: undefined,
 }
 
@@ -36,6 +41,11 @@ function eqEditorReducer(
       return {
         ...state,
         sourceFileName: action.payload,
+      }
+    case 'set-audio-file-name':
+      return {
+        ...state,
+        audioFileName: action.payload,
       }
     case 'set-baseline-curve':
       return {
@@ -65,6 +75,20 @@ function eqEditorReducer(
         bands: state.bands.map((band) =>
           band.id === action.payload.id ? action.payload : band,
         ),
+      }
+    case 'toggle-band-bypass':
+      return {
+        ...state,
+        bands: state.bands.map((band) =>
+          band.id === action.payload.id
+            ? { ...band, isBypassed: !band.isBypassed }
+            : band,
+        ),
+      }
+    case 'toggle-monitor-bypass':
+      return {
+        ...state,
+        monitorBypassed: !state.monitorBypassed,
       }
     case 'remove-band': {
       const nextBands = state.bands.filter((band) => band.id !== action.payload.id)

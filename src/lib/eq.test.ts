@@ -75,6 +75,7 @@ describe('computeEqCurve', () => {
         id: 'band-1',
         type: 'peaking',
         frequencyHz: 1000,
+        isBypassed: false,
         gainDb: 6,
         q: 1,
       },
@@ -91,6 +92,7 @@ describe('computeEqCurve', () => {
         id: 'cut-12',
         type: 'lowCut',
         frequencyHz: 200,
+        isBypassed: false,
         slopeDbPerOct: 12,
       },
     ]
@@ -99,6 +101,7 @@ describe('computeEqCurve', () => {
         id: 'cut-48',
         type: 'lowCut',
         frequencyHz: 200,
+        isBypassed: false,
         slopeDbPerOct: 48,
       },
     ]

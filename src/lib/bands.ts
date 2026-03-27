@@ -5,6 +5,7 @@ type DefaultBandOptions = {
   gainDb?: number
   q?: number
   id?: string
+  isBypassed?: boolean
 }
 
 function createBandId() {
@@ -19,6 +20,7 @@ export function createDefaultBand(
 ): EqBand {
   const frequencyHz = options.frequencyHz ?? 1_000
   const id = options.id ?? createBandId()
+  const isBypassed = options.isBypassed ?? false
 
   switch (type) {
     case 'peaking':
@@ -26,6 +28,7 @@ export function createDefaultBand(
         id,
         type,
         frequencyHz,
+        isBypassed,
         gainDb: options.gainDb ?? 0,
         q: options.q ?? 1,
       }
@@ -35,6 +38,7 @@ export function createDefaultBand(
         id,
         type,
         frequencyHz,
+        isBypassed,
         gainDb: options.gainDb ?? 0,
       }
     case 'lowCut':
@@ -43,6 +47,7 @@ export function createDefaultBand(
         id,
         type,
         frequencyHz,
+        isBypassed,
         slopeDbPerOct: 24,
       }
   }
@@ -75,6 +80,7 @@ export function convertBandType(band: EqBand, nextType: EqBandType): EqBand {
   return createDefaultBand(nextType, {
     id: band.id,
     frequencyHz: band.frequencyHz,
+    isBypassed: band.isBypassed,
     gainDb: 'gainDb' in band ? band.gainDb : 0,
     q: band.type === 'peaking' ? band.q : 1,
   })

@@ -243,6 +243,16 @@
   fill: rgba(255, 135, 78, 0.4);
 }
 
+.band-node.is-bypassed {
+  fill: rgba(255, 255, 255, 0.06);
+  stroke: rgba(255, 255, 255, 0.28);
+}
+
+.band-node.is-bypassed:hover,
+.band-node.is-bypassed.is-selected {
+  fill: rgba(255, 255, 255, 0.12);
+}
+
 .chart-hint {
   position: absolute;
   inset: 1rem auto auto 1rem;
@@ -276,6 +286,11 @@
   background: rgba(7, 11, 16, 0.94);
   box-shadow: 0 1.25rem 2.5rem rgba(0, 0, 0, 0.28);
   font-size: 0.88rem;
+}
+
+.band-popover.is-bypassed {
+  background: rgba(13, 15, 19, 0.92);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .band-popover.is-right {
@@ -346,6 +361,27 @@
   font: inherit;
 }
 
+.chip-button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted-strong);
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1.1;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.chip-button.is-active {
+  background: rgba(255, 205, 98, 0.12);
+  border-color: rgba(255, 205, 98, 0.3);
+  color: #ffe4a9;
+}
+
 .info-stack {
   margin-top: 0.8rem;
   display: grid;
@@ -368,12 +404,16 @@
 
 .readonly-band-list article {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.75rem;
-  align-items: flex-start;
+  align-items: center;
   padding: 0.7rem 0.8rem;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.readonly-band-list article.is-bypassed {
+  opacity: 0.72;
 }
 
 .readonly-band-list span {

@@ -16,9 +16,18 @@ describe('file serialization helpers', () => {
       serializePreset({
         version: 1,
         sourceFileName: 'demo.csv',
-        bands: [],
+        bands: [
+          {
+            id: 'band-1',
+            type: 'peaking',
+            frequencyHz: 1000,
+            isBypassed: true,
+            gainDb: 2,
+            q: 1,
+          },
+        ],
       }),
-    ).toContain('"version": 1')
+    ).toContain('"isBypassed": true')
   })
 })
 

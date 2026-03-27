@@ -33,14 +33,18 @@ function EditorShell() {
   const exportHandleRef = useRef<FileSystemFileHandle | null>(null)
   const { state, dispatch } = useEqEditor()
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const activeBands = useMemo(
+    () => state.bands.filter((band) => !band.isBypassed),
+    [state.bands],
+  )
 
   const bandCurve = useMemo(
     () =>
       computeEqCurve(
-        state.bands,
+        activeBands,
         state.baselineCurve.map((point) => point.frequencyHz),
       ),
-    [state.bands, state.baselineCurve],
+    [activeBands, state.baselineCurve],
   )
 
   const outputCurve = useMemo(
@@ -126,6 +130,10 @@ function EditorShell() {
 
   function handleRemoveBand(bandId: string) {
     dispatch({ type: 'remove-band', payload: { id: bandId } })
+  }
+
+  function handleToggleBandBypass(bandId: string) {
+    dispatch({ type: 'toggle-band-bypass', payload: { id: bandId } })
   }
 
   function handleImportClick() {
@@ -257,7 +265,7 @@ function EditorShell() {
               </article>
               <article>
                 <span>Bands</span>
-                <strong>{state.bands.length}</strong>
+                <strong>{activeBands.length} / {state.bands.length}</strong>
               </article>
               <article>
                 <span>Output peak</span>
@@ -278,6 +286,7 @@ function EditorShell() {
               <li>Import a baseline EQ or stay on the flat default curve.</li>
               <li>Double-click inside the graph to create a band.</li>
               <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q.</li>
+              <li>Use Band bypass to A/B nodes without deleting them.</li>
               <li>Save the preset with Ctrl+S and export the final output EQ.</li>
             </ol>
           </section>
@@ -322,6 +331,7 @@ function EditorShell() {
               dispatch({ type: 'add-band', payload: band })
             }
             onBandDelete={handleRemoveBand}
+            onBandToggleBypass={handleToggleBandBypass}
             onBandSelect={(bandId) =>
               dispatch({
                 type: 'select-band',
@@ -353,6 +363,7 @@ function EditorShell() {
                     {'gainDb' in selectedBand
                       ? `, ${formatDb(selectedBand.gainDb)}`
                       : `, ${selectedBand.slopeDbPerOct} dB/oct`}
+                    {selectedBand.isBypassed ? ', bypassed' : ''}
                   </p>
                 ) : (
                   <p>
@@ -370,6 +381,7 @@ function EditorShell() {
               <li>Double-click graph: create a peaking band at the cursor.</li>
               <li>Double-click node: delete that band.</li>
               <li>Double-click popover values: edit frequency, gain, Q or slope.</li>
+              <li>Band bypass affects the graph, export and monitor chain.</li>
               <li>Drag a bell node and use the mouse wheel to adjust Q.</li>
               <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
               <li>`Delete` / `Backspace`: remove the selected band.</li>
@@ -386,7 +398,10 @@ function EditorShell() {
             ) : (
               <div className="readonly-band-list">
                 {sortedBands.map((band, index) => (
-                  <article key={band.id}>
+                  <article
+                    key={band.id}
+                    className={band.isBypassed ? 'is-bypassed' : undefined}
+                  >
                     <span>{index + 1}</span>
                     <div>
                       <strong>{describeBand(band)}</strong>
@@ -395,8 +410,17 @@ function EditorShell() {
                         {'gainDb' in band
                           ? ` · ${formatDb(band.gainDb)}`
                           : ` · ${band.slopeDbPerOct} dB/oct`}
+                        {band.isBypassed ? ' · bypassed' : ''}
                       </p>
                     </div>
+                    <button
+                      type="button"
+                      className={`chip-button ${band.isBypassed ? 'is-active' : ''}`}
+                      aria-pressed={band.isBypassed}
+                      onClick={() => handleToggleBandBypass(band.id)}
+                    >
+                      Band bypass
+                    </button>
                   </article>
                 ))}
               </div>

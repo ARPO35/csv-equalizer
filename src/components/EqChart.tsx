@@ -159,6 +159,7 @@ export function EqChart({
   onBandCommit,
   onBandCreate,
   onBandDelete,
+  onBandToggleBypass,
   onBandSelect,
 }: {
   baselineCurve: CurvePoint[]
@@ -170,6 +171,7 @@ export function EqChart({
   onBandCommit: (band: EqBand) => void
   onBandCreate: (band: EqBand) => void
   onBandDelete: (bandId: string) => void
+  onBandToggleBypass: (bandId: string) => void
   onBandSelect: (bandId?: string) => void
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -413,7 +415,7 @@ export function EqChart({
           <g key={band.id}>
             <circle
               aria-label={`${describeBand(band)} band`}
-              className={`band-node ${band.id === selectedBandId ? 'is-selected' : ''}`}
+              className={`band-node ${band.id === selectedBandId ? 'is-selected' : ''} ${band.isBypassed ? 'is-bypassed' : ''}`}
               cx={getX(band.frequencyHz)}
               cy={getY('gainDb' in band ? band.gainDb : 0, minDb, maxDb)}
               r={band.id === selectedBandId ? 8 : 6}
@@ -463,7 +465,7 @@ export function EqChart({
 
       {popupBand ? (
         <div
-          className={`band-popover ${popupAlign}`}
+          className={`band-popover ${popupAlign} ${popupBand.isBypassed ? 'is-bypassed' : ''}`}
           style={popupStyle}
           onMouseEnter={() => {
             clearHoverTimer()
@@ -487,6 +489,18 @@ export function EqChart({
               onClick={() => onBandDelete(popupBand.id)}
             >
               ×
+            </button>
+          </div>
+
+          <div className="popover-row">
+            <span>Band bypass</span>
+            <button
+              type="button"
+              className={`chip-button ${popupBand.isBypassed ? 'is-active' : ''}`}
+              aria-pressed={popupBand.isBypassed}
+              onClick={() => onBandToggleBypass(popupBand.id)}
+            >
+              {popupBand.isBypassed ? 'Bypassed' : 'Active'}
             </button>
           </div>
 
