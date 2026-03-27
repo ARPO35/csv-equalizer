@@ -4,14 +4,20 @@ import {
   useEffectEvent,
   useMemo,
   useRef,
+  useState,
 } from 'react'
 import './App.css'
 import { EqChart } from './components/EqChart'
 import { createDefaultBand, describeBand, sortBandsByFrequency } from './lib/bands'
 import { parseCurveCsv } from './lib/csv'
 import { computeEqCurve, sumCurveWithEq } from './lib/eq'
+import {
+  saveTextFile,
+  serializeCurveCsv,
+  serializePreset,
+} from './lib/files'
 import { EqEditorProvider, useEqEditor } from './state'
-import type { EqBand, EqBandType } from './types'
+import type { EqBand, EqBandType, ProjectPresetV1 } from './types'
 
 function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
@@ -27,7 +33,10 @@ function getSelectedBand(bands: EqBand[], selectedBandId?: string) {
 
 function EditorShell() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const presetHandleRef = useRef<FileSystemFileHandle | null>(null)
+  const exportHandleRef = useRef<FileSystemFileHandle | null>(null)
   const { state, dispatch } = useEqEditor()
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   const eqCurve = useMemo(() => {
     if (state.curve.length === 0) {
@@ -48,6 +57,21 @@ function EditorShell() {
   }, [eqCurve, state.curve])
 
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
+  const canSavePreset = state.curve.length > 0 || state.bands.length > 0
+  const canExportCurve = state.curve.length > 0
+  const preset = useMemo<ProjectPresetV1>(
+    () => ({
+      version: 1,
+      sourceFileName: state.sourceFileName,
+      bands: state.bands,
+    }),
+    [state.bands, state.sourceFileName],
+  )
+
+  function getBaseFileName() {
+    const sourceName = state.sourceFileName ?? 'curve'
+    return sourceName.replace(/\.csv$/i, '')
+  }
 
   const handleDeleteSelectedBand = useEffectEvent((event: KeyboardEvent) => {
     if (
@@ -84,6 +108,26 @@ function EditorShell() {
     }
   }, [handleDeleteSelectedBand])
 
+  const handleSaveShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') {
+      return
+    }
+
+    if (!canSavePreset) {
+      return
+    }
+
+    event.preventDefault()
+    void handleSavePreset()
+  })
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleSaveShortcut)
+    return () => {
+      window.removeEventListener('keydown', handleSaveShortcut)
+    }
+  }, [handleSaveShortcut])
+
   function updateBand(nextBand: EqBand) {
     dispatch({ type: 'update-band', payload: nextBand })
   }
@@ -119,6 +163,48 @@ function EditorShell() {
 
   function handleAddBand() {
     dispatch({ type: 'add-band', payload: createDefaultBand('peaking') })
+  }
+
+  async function handleSavePreset() {
+    try {
+      const result = await saveTextFile({
+        suggestedName: `${getBaseFileName()}.heq.json`,
+        mimeType: 'application/json',
+        contents: serializePreset(preset),
+        handle: presetHandleRef.current,
+      })
+      presetHandleRef.current = result.handle
+      setStatusMessage(
+        result.mode === 'picker'
+          ? 'Preset saved to the selected file.'
+          : 'Preset downloaded as a local file.',
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to save preset.'
+      dispatch({ type: 'set-error', payload: message })
+    }
+  }
+
+  async function handleExportCurve() {
+    try {
+      const result = await saveTextFile({
+        suggestedName: `${getBaseFileName()}-eq.csv`,
+        mimeType: 'text/csv',
+        contents: serializeCurveCsv(eqCurve),
+        handle: exportHandleRef.current,
+      })
+      exportHandleRef.current = result.handle
+      setStatusMessage(
+        result.mode === 'picker'
+          ? 'EQ curve exported to the selected file.'
+          : 'EQ curve downloaded as CSV.',
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to export EQ curve.'
+      dispatch({ type: 'set-error', payload: message })
+    }
   }
 
   function handleBandTypeChange(nextType: EqBandType) {
@@ -205,10 +291,20 @@ function EditorShell() {
           <button type="button" className="ghost-button" onClick={handleImportClick}>
             Import CSV
           </button>
-          <button type="button" className="ghost-button" disabled>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!canSavePreset}
+            onClick={() => void handleSavePreset()}
+          >
             Save preset
           </button>
-          <button type="button" className="accent-button" disabled>
+          <button
+            type="button"
+            className="accent-button"
+            disabled={!canExportCurve}
+            onClick={() => void handleExportCurve()}
+          >
             Export curve
           </button>
         </div>
@@ -257,6 +353,13 @@ function EditorShell() {
             <section className="panel-section">
               <p className="section-label">Import status</p>
               <div className="status-box status-error">{state.errorMessage}</div>
+            </section>
+          ) : null}
+
+          {statusMessage ? (
+            <section className="panel-section">
+              <p className="section-label">Latest action</p>
+              <div className="status-box status-success">{statusMessage}</div>
             </section>
           ) : null}
         </aside>

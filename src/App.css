@@ -362,6 +362,12 @@
   background: rgba(255, 117, 89, 0.08);
 }
 
+.status-success {
+  color: #dfffc6;
+  border-color: rgba(166, 255, 74, 0.28);
+  background: rgba(166, 255, 74, 0.08);
+}
+
 .band-delete {
   margin-top: 0.35rem;
 }
