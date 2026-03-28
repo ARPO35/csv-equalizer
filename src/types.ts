@@ -41,6 +41,11 @@ export type EqEditorState = {
   bands: EqBand[]
   selectedBandId?: string
   monitorBypassed: boolean
+  monitorBaselineEnabled: boolean
+  viewMaxDb: number
+  viewMinDb: number
+  preGainMode: 'auto' | 'manual'
+  manualPreGainDb: number
   audioFileName?: string
   errorMessage?: string
 }

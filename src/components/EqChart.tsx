@@ -72,21 +72,18 @@ function getY(gainDb: number, minDb: number, maxDb: number) {
   return PADDING.top + ((maxDb - gainDb) / (maxDb - minDb)) * chartHeight
 }
 
-function getChartBounds(
-  baselineCurve: CurvePoint[],
-  bandCurve: CurvePoint[],
-  outputCurve: CurvePoint[],
-) {
-  const values = [...baselineCurve, ...bandCurve, ...outputCurve].map((point) => point.gainDb)
-  const minValue = Math.min(...values, -12)
-  const maxValue = Math.max(...values, 12)
-  const padding = Math.max(3, (maxValue - minValue) * 0.12)
-  const minDb = Math.floor((minValue - padding) / 3) * 3
-  const maxDb = Math.ceil((maxValue + padding) / 3) * 3
-  return {
-    minDb,
-    maxDb: maxDb === minDb ? maxDb + 6 : maxDb,
+function createYAxisTicks(minDb: number, maxDb: number) {
+  const range = maxDb - minDb
+  const step = range <= 24 ? 3 : 6
+  const start = Math.ceil(minDb / step) * step
+  const end = Math.floor(maxDb / step) * step
+  const ticks: number[] = []
+
+  for (let value = start; value <= end; value += step) {
+    ticks.push(value)
   }
+
+  return ticks
 }
 
 function clampFrequency(value: number) {
@@ -156,11 +153,17 @@ export function EqChart({
   bands,
   selectedBandId,
   showFlatHint,
+  viewMinDb,
+  viewMaxDb,
   onBandCommit,
   onBandCreate,
   onBandDelete,
   onBandToggleBypass,
   onBandSelect,
+  onIncreaseViewMax,
+  onDecreaseViewMax,
+  onIncreaseViewMin,
+  onDecreaseViewMin,
 }: {
   baselineCurve: CurvePoint[]
   bandCurve: CurvePoint[]
@@ -168,22 +171,31 @@ export function EqChart({
   bands: EqBand[]
   selectedBandId?: string
   showFlatHint: boolean
+  viewMinDb: number
+  viewMaxDb: number
   onBandCommit: (band: EqBand) => void
   onBandCreate: (band: EqBand) => void
   onBandDelete: (bandId: string) => void
   onBandToggleBypass: (bandId: string) => void
   onBandSelect: (bandId?: string) => void
+  onIncreaseViewMax: () => void
+  onDecreaseViewMax: () => void
+  onIncreaseViewMin: () => void
+  onDecreaseViewMin: () => void
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const hoverCloseTimerRef = useRef<number | null>(null)
   const [draggingBandId, setDraggingBandId] = useState<string | null>(null)
   const [hoveredBandId, setHoveredBandId] = useState<string | null>(null)
+  const [pinnedBandId, setPinnedBandId] = useState<string | null>(null)
   const [editingField, setEditingField] = useState<EditableField | null>(null)
   const [editingDraft, setEditingDraft] = useState('')
-  const { minDb, maxDb } = getChartBounds(baselineCurve, bandCurve, outputCurve)
-  const yLines = Array.from({ length: Math.floor((maxDb - minDb) / 6) + 1 }, (_, index) => maxDb - index * 6)
 
-  const popupBandId = hoveredBandId ?? selectedBandId
+  const yTicks = useMemo(
+    () => createYAxisTicks(viewMinDb, viewMaxDb),
+    [viewMaxDb, viewMinDb],
+  )
+  const popupBandId = draggingBandId ?? hoveredBandId ?? pinnedBandId
   const popupBand = useMemo(
     () => bands.find((band) => band.id === popupBandId),
     [bands, popupBandId],
@@ -192,6 +204,7 @@ export function EqChart({
     () => bands.find((band) => band.id === draggingBandId),
     [bands, draggingBandId],
   )
+
 
   useEffect(() => () => {
     if (hoverCloseTimerRef.current !== null) {
@@ -207,7 +220,7 @@ export function EqChart({
   }
 
   function scheduleHoverClose(bandId: string) {
-    if (bandId === selectedBandId) {
+    if (bandId === pinnedBandId) {
       return
     }
 
@@ -236,10 +249,7 @@ export function EqChart({
 
   function getFrequencyFromX(x: number) {
     const chartWidth = VIEWBOX_WIDTH - PADDING.left - PADDING.right
-    const clampedX = Math.min(
-      PADDING.left + chartWidth,
-      Math.max(PADDING.left, x),
-    )
+    const clampedX = Math.min(PADDING.left + chartWidth, Math.max(PADDING.left, x))
     const minLog = Math.log10(MIN_FREQUENCY)
     const maxLog = Math.log10(MAX_FREQUENCY)
     const ratio = (clampedX - PADDING.left) / chartWidth
@@ -248,12 +258,9 @@ export function EqChart({
 
   function getGainFromY(y: number) {
     const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
-    const clampedY = Math.min(
-      PADDING.top + chartHeight,
-      Math.max(PADDING.top, y),
-    )
+    const clampedY = Math.min(PADDING.top + chartHeight, Math.max(PADDING.top, y))
     const ratio = (clampedY - PADDING.top) / chartHeight
-    return maxDb - ratio * (maxDb - minDb)
+    return viewMaxDb - ratio * (viewMaxDb - viewMinDb)
   }
 
   function handlePointerMove(event: PointerEvent<SVGCircleElement>, band: EqBand) {
@@ -339,13 +346,29 @@ export function EqChart({
     })
     onBandCreate(band)
     onBandSelect(band.id)
+    setPinnedBandId(band.id)
     setHoveredBandId(band.id)
+  }
+
+  function handleChartClick(event: MouseEvent<SVGSVGElement>) {
+    const target = event.target
+    if (
+      target instanceof Element &&
+      target instanceof SVGElement &&
+      target.tagName.toLowerCase() === 'circle'
+    ) {
+      return
+    }
+
+    setPinnedBandId(null)
+    setHoveredBandId(null)
+    onBandSelect(undefined)
   }
 
   const popupStyle = popupBand
     ? {
         left: `${(getX(popupBand.frequencyHz) / VIEWBOX_WIDTH) * 100}%`,
-        top: `${(getY('gainDb' in popupBand ? popupBand.gainDb : 0, minDb, maxDb) / VIEWBOX_HEIGHT) * 100}%`,
+        top: `${(getY('gainDb' in popupBand ? popupBand.gainDb : 0, viewMinDb, viewMaxDb) / VIEWBOX_HEIGHT) * 100}%`,
       }
     : undefined
 
@@ -355,12 +378,31 @@ export function EqChart({
 
   return (
     <div className="chart-frame" onWheel={handleChartWheel}>
+      <div className="chart-bound-controls chart-bound-controls-top">
+        <button type="button" className="axis-button" onClick={onIncreaseViewMax}>
+          +
+        </button>
+        <button type="button" className="axis-button" onClick={onDecreaseViewMax}>
+          -
+        </button>
+      </div>
+
+      <div className="chart-bound-controls chart-bound-controls-bottom">
+        <button type="button" className="axis-button" onClick={onDecreaseViewMin}>
+          -
+        </button>
+        <button type="button" className="axis-button" onClick={onIncreaseViewMin}>
+          +
+        </button>
+      </div>
+
       <svg
         ref={svgRef}
         className="chart-svg"
         viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
         role="img"
         aria-label="EQ editing surface"
+        onClick={handleChartClick}
         onDoubleClick={handleChartDoubleClick}
       >
         <rect
@@ -389,8 +431,8 @@ export function EqChart({
           )
         })}
 
-        {yLines.map((value) => {
-          const y = getY(value, minDb, maxDb)
+        {yTicks.map((value) => {
+          const y = getY(value, viewMinDb, viewMaxDb)
           return (
             <g key={value}>
               <line
@@ -407,9 +449,9 @@ export function EqChart({
           )
         })}
 
-        <path className="curve curve-source" d={createPath(baselineCurve, minDb, maxDb)} />
-        <path className="curve curve-eq" d={createPath(bandCurve, minDb, maxDb)} />
-        <path className="curve curve-preview" d={createPath(outputCurve, minDb, maxDb)} />
+        <path className="curve curve-source" d={createPath(baselineCurve, viewMinDb, viewMaxDb)} />
+        <path className="curve curve-eq" d={createPath(bandCurve, viewMinDb, viewMaxDb)} />
+        <path className="curve curve-preview" d={createPath(outputCurve, viewMinDb, viewMaxDb)} />
 
         {bands.map((band) => (
           <g key={band.id}>
@@ -417,20 +459,27 @@ export function EqChart({
               aria-label={`${describeBand(band)} band`}
               className={`band-node ${band.id === selectedBandId ? 'is-selected' : ''} ${band.isBypassed ? 'is-bypassed' : ''}`}
               cx={getX(band.frequencyHz)}
-              cy={getY('gainDb' in band ? band.gainDb : 0, minDb, maxDb)}
+              cy={getY('gainDb' in band ? band.gainDb : 0, viewMinDb, viewMaxDb)}
               r={band.id === selectedBandId ? 8 : 6}
               onMouseEnter={() => {
                 clearHoverTimer()
                 setHoveredBandId(band.id)
               }}
               onMouseLeave={() => scheduleHoverClose(band.id)}
-              onClick={() => onBandSelect(band.id)}
+              onClick={(event) => {
+                event.stopPropagation()
+                setPinnedBandId(band.id)
+                setHoveredBandId(band.id)
+                onBandSelect(band.id)
+              }}
               onDoubleClick={(event) => {
                 event.stopPropagation()
                 onBandDelete(band.id)
               }}
               onPointerDown={(event) => {
+                event.stopPropagation()
                 onBandSelect(band.id)
+                setPinnedBandId(null)
                 clearHoverTimer()
                 setHoveredBandId(band.id)
                 setDraggingBandId(band.id)
@@ -472,7 +521,7 @@ export function EqChart({
             setHoveredBandId(popupBand.id)
           }}
           onMouseLeave={() => {
-            if (popupBand.id !== selectedBandId) {
+            if (popupBand.id !== pinnedBandId) {
               setHoveredBandId(null)
             }
           }}
@@ -488,7 +537,7 @@ export function EqChart({
               aria-label="Delete band"
               onClick={() => onBandDelete(popupBand.id)}
             >
-              ×
+              x
             </button>
           </div>
 
@@ -545,9 +594,7 @@ export function EqChart({
                 type="button"
                 className="popover-value"
                 aria-label="Edit frequency"
-                onDoubleClick={() =>
-                  startEditing('frequencyHz', popupBand.frequencyHz.toFixed(0))
-                }
+                onDoubleClick={() => startEditing('frequencyHz', popupBand.frequencyHz.toFixed(0))}
               >
                 {formatFrequencyValue(popupBand.frequencyHz)}
               </button>
@@ -581,9 +628,7 @@ export function EqChart({
                   type="button"
                   className="popover-value"
                   aria-label="Edit gain"
-                  onDoubleClick={() =>
-                    startEditing('gainDb', popupBand.gainDb.toFixed(1))
-                  }
+                  onDoubleClick={() => startEditing('gainDb', popupBand.gainDb.toFixed(1))}
                 >
                   {formatGainValue(popupBand.gainDb)}
                 </button>
@@ -653,9 +698,7 @@ export function EqChart({
                   type="button"
                   className="popover-value"
                   aria-label="Edit slope"
-                  onDoubleClick={() =>
-                    startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())
-                  }
+                  onDoubleClick={() => startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())}
                 >
                   {popupBand.slopeDbPerOct} dB/oct
                 </button>
@@ -667,3 +710,4 @@ export function EqChart({
     </div>
   )
 }
+

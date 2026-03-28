@@ -78,6 +78,15 @@ function EditorShell() {
     return sourceName.replace(/\.csv$/i, '')
   }
 
+  function scaleDbBoundary(value: number, grow: boolean, negative: boolean) {
+    const factor = grow ? 1.25 : 1 / 1.25
+    const magnitude = Math.min(
+      48,
+      Math.max(3, Math.round(Math.abs(value) * factor * 10) / 10),
+    )
+    return negative ? -magnitude : magnitude
+  }
+
   const handleDeleteSelectedBand = useEffectEvent((event: KeyboardEvent) => {
     if (
       event.key !== 'Delete' &&
@@ -431,6 +440,8 @@ function EditorShell() {
             bands={state.bands}
             selectedBandId={state.selectedBandId}
             showFlatHint={!state.sourceFileName}
+            viewMinDb={state.viewMinDb}
+            viewMaxDb={state.viewMaxDb}
             onBandCommit={updateBand}
             onBandCreate={(band) =>
               dispatch({ type: 'add-band', payload: band })
@@ -441,6 +452,30 @@ function EditorShell() {
               dispatch({
                 type: 'select-band',
                 payload: bandId ? { id: bandId } : undefined,
+              })
+            }
+            onIncreaseViewMax={() =>
+              dispatch({
+                type: 'set-view-max-db',
+                payload: scaleDbBoundary(state.viewMaxDb, true, false),
+              })
+            }
+            onDecreaseViewMax={() =>
+              dispatch({
+                type: 'set-view-max-db',
+                payload: scaleDbBoundary(state.viewMaxDb, false, false),
+              })
+            }
+            onIncreaseViewMin={() =>
+              dispatch({
+                type: 'set-view-min-db',
+                payload: scaleDbBoundary(state.viewMinDb, true, true),
+              })
+            }
+            onDecreaseViewMin={() =>
+              dispatch({
+                type: 'set-view-min-db',
+                payload: scaleDbBoundary(state.viewMinDb, false, true),
               })
             }
           />
@@ -547,3 +582,5 @@ function App() {
 }
 
 export default App
+
+

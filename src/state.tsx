@@ -19,6 +19,11 @@ type EqEditorAction =
   | { type: 'update-band'; payload: EqBand }
   | { type: 'toggle-band-bypass'; payload: { id: string } }
   | { type: 'toggle-monitor-bypass' }
+  | { type: 'toggle-monitor-baseline' }
+  | { type: 'set-view-max-db'; payload: number }
+  | { type: 'set-view-min-db'; payload: number }
+  | { type: 'set-pre-gain-mode'; payload: 'auto' | 'manual' }
+  | { type: 'set-manual-pre-gain-db'; payload: number }
   | { type: 'remove-band'; payload: { id: string } }
   | { type: 'select-band'; payload?: { id: string } }
 
@@ -28,6 +33,11 @@ const initialState: EqEditorState = {
   bands: [],
   selectedBandId: undefined,
   monitorBypassed: false,
+  monitorBaselineEnabled: false,
+  viewMaxDb: 15,
+  viewMinDb: -15,
+  preGainMode: 'auto',
+  manualPreGainDb: -8,
   audioFileName: undefined,
   errorMessage: undefined,
 }
@@ -89,6 +99,31 @@ function eqEditorReducer(
       return {
         ...state,
         monitorBypassed: !state.monitorBypassed,
+      }
+    case 'toggle-monitor-baseline':
+      return {
+        ...state,
+        monitorBaselineEnabled: !state.monitorBaselineEnabled,
+      }
+    case 'set-view-max-db':
+      return {
+        ...state,
+        viewMaxDb: action.payload,
+      }
+    case 'set-view-min-db':
+      return {
+        ...state,
+        viewMinDb: action.payload,
+      }
+    case 'set-pre-gain-mode':
+      return {
+        ...state,
+        preGainMode: action.payload,
+      }
+    case 'set-manual-pre-gain-db':
+      return {
+        ...state,
+        manualPreGainDb: action.payload,
       }
     case 'remove-band': {
       const nextBands = state.bands.filter((band) => band.id !== action.payload.id)

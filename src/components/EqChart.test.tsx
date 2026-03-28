@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EqChart } from './EqChart'
@@ -6,6 +6,32 @@ import { createFlatCurve } from '../lib/curve'
 import type { EqBand } from '../types'
 
 const baselineCurve = createFlatCurve([20, 1000, 20000])
+
+function renderChart(
+  overrides: Partial<React.ComponentProps<typeof EqChart>> = {},
+) {
+  return render(
+    <EqChart
+      baselineCurve={baselineCurve}
+      bandCurve={createFlatCurve([20, 1000, 20000])}
+      outputCurve={baselineCurve}
+      bands={[]}
+      showFlatHint
+      viewMinDb={-15}
+      viewMaxDb={15}
+      onBandCommit={vi.fn()}
+      onBandCreate={vi.fn()}
+      onBandDelete={vi.fn()}
+      onBandToggleBypass={vi.fn()}
+      onBandSelect={vi.fn()}
+      onIncreaseViewMax={vi.fn()}
+      onDecreaseViewMax={vi.fn()}
+      onIncreaseViewMin={vi.fn()}
+      onDecreaseViewMin={vi.fn()}
+      {...overrides}
+    />,
+  )
+}
 
 describe('EqChart', () => {
   beforeEach(() => {
@@ -24,6 +50,7 @@ describe('EqChart', () => {
 
   afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -31,20 +58,7 @@ describe('EqChart', () => {
     const user = userEvent.setup()
     const onBandCreate = vi.fn()
 
-    render(
-      <EqChart
-        baselineCurve={baselineCurve}
-        bandCurve={createFlatCurve([20, 1000, 20000])}
-        outputCurve={baselineCurve}
-        bands={[]}
-        showFlatHint
-        onBandCommit={vi.fn()}
-        onBandCreate={onBandCreate}
-        onBandDelete={vi.fn()}
-        onBandToggleBypass={vi.fn()}
-        onBandSelect={vi.fn()}
-      />,
-    )
+    renderChart({ onBandCreate })
 
     await user.dblClick(screen.getByLabelText('EQ editing surface'))
 
@@ -67,21 +81,12 @@ describe('EqChart', () => {
       q: 1.1,
     }
 
-    render(
-      <EqChart
-        baselineCurve={baselineCurve}
-        bandCurve={createFlatCurve([20, 1000, 20000])}
-        outputCurve={baselineCurve}
-        bands={[band]}
-        selectedBandId={band.id}
-        showFlatHint={false}
-        onBandCommit={vi.fn()}
-        onBandCreate={vi.fn()}
-        onBandDelete={onBandDelete}
-        onBandToggleBypass={vi.fn()}
-        onBandSelect={vi.fn()}
-      />,
-    )
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandDelete,
+    })
 
     await user.hover(screen.getByLabelText('Bell band'))
     expect(screen.getByText('Selected node')).toBeTruthy()
@@ -102,23 +107,15 @@ describe('EqChart', () => {
       q: 1.1,
     }
 
-    const { container } = render(
-      <EqChart
-        baselineCurve={baselineCurve}
-        bandCurve={createFlatCurve([20, 1000, 20000])}
-        outputCurve={baselineCurve}
-        bands={[band]}
-        selectedBandId={band.id}
-        showFlatHint={false}
-        onBandCommit={onBandCommit}
-        onBandCreate={vi.fn()}
-        onBandDelete={vi.fn()}
-        onBandToggleBypass={vi.fn()}
-        onBandSelect={vi.fn()}
-      />,
-    )
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
 
     const chart = within(container)
+    await user.click(chart.getByLabelText('Bell band'))
     await user.dblClick(chart.getByLabelText('Edit frequency'))
     const input = chart.getByLabelText('Frequency')
     await user.clear(input)
@@ -141,21 +138,12 @@ describe('EqChart', () => {
       q: 1.1,
     }
 
-    const { container } = render(
-      <EqChart
-        baselineCurve={baselineCurve}
-        bandCurve={createFlatCurve([20, 1000, 20000])}
-        outputCurve={baselineCurve}
-        bands={[band]}
-        selectedBandId={band.id}
-        showFlatHint={false}
-        onBandCommit={onBandCommit}
-        onBandCreate={vi.fn()}
-        onBandDelete={vi.fn()}
-        onBandToggleBypass={vi.fn()}
-        onBandSelect={vi.fn()}
-      />,
-    )
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
 
     const chart = within(container)
     const node = chart.getByLabelText('Bell band')
@@ -195,23 +183,65 @@ describe('EqChart', () => {
       q: 1.1,
     }
 
-    render(
-      <EqChart
-        baselineCurve={baselineCurve}
-        bandCurve={createFlatCurve([20, 1000, 20000])}
-        outputCurve={baselineCurve}
-        bands={[band]}
-        selectedBandId={band.id}
-        showFlatHint={false}
-        onBandCommit={vi.fn()}
-        onBandCreate={vi.fn()}
-        onBandDelete={vi.fn()}
-        onBandToggleBypass={onBandToggleBypass}
-        onBandSelect={vi.fn()}
-      />,
-    )
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandToggleBypass,
+    })
 
+    await user.click(screen.getByLabelText('Bell band'))
     await user.click(screen.getByRole('button', { name: 'Bypassed' }))
     expect(onBandToggleBypass).toHaveBeenCalledWith('band-1')
   })
+
+  it('closes the popover after dragging when the pointer leaves', () => {
+    vi.useFakeTimers()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+    }
+
+    renderChart({
+      bands: [band],
+      showFlatHint: false,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    expect(screen.getByText('Selected node')).toBeTruthy()
+
+    fireEvent.pointerUp(node, { pointerId: 1 })
+    fireEvent.mouseLeave(node)
+    act(() => {
+      vi.advanceTimersByTime(150)
+    })
+
+    expect(screen.queryByText('Selected node')).toBeNull()
+  })
+
+  it('calls the view bound controls independently', async () => {
+    const user = userEvent.setup()
+    const onIncreaseViewMax = vi.fn()
+    const onDecreaseViewMin = vi.fn()
+
+    renderChart({ onIncreaseViewMax, onDecreaseViewMin })
+
+    const buttons = screen.getAllByRole('button', { name: /^[+-]$/ })
+    await user.click(buttons[0])
+    await user.click(buttons[2])
+
+    expect(onIncreaseViewMax).toHaveBeenCalledTimes(1)
+    expect(onDecreaseViewMin).toHaveBeenCalledTimes(1)
+  })
 })
+
+

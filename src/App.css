@@ -211,6 +211,34 @@
   overflow: hidden;
 }
 
+.chart-bound-controls {
+  position: absolute;
+  right: 0.55rem;
+  z-index: 6;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.chart-bound-controls-top {
+  top: 0.6rem;
+}
+
+.chart-bound-controls-bottom {
+  bottom: 0.6rem;
+}
+
+.axis-button {
+  appearance: none;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(7, 11, 16, 0.88);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
 .chart-svg {
   width: 100%;
   height: 100%;
@@ -569,3 +597,4 @@
     transform: translate(-50%, 1rem);
   }
 }
+
