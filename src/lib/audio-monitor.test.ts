@@ -66,6 +66,7 @@ describe('audio monitor graph', () => {
 
     expect(getConnections(graph.source)).toHaveLength(2)
     expect(getConnections(graph.dryGain)).toEqual([context.destination])
+    expect(getConnections(graph.preGainNode)).toEqual([graph.wetGain as unknown as FakeAudioNode])
     expect(getConnections(graph.wetGain)).toEqual([context.destination])
   })
 
@@ -100,12 +101,13 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, bands, baselineCurve, false, true)
+    syncMonitorGraph(context, graph, bands, baselineCurve, false, true, -10)
 
     expect(graph.filterNodes).toHaveLength(33)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
     expect((graph.filterNodes[30] as unknown as FakeBiquadFilterNode).type).toBe('highshelf')
     expect((graph.filterNodes[31] as unknown as FakeBiquadFilterNode).type).toBe('lowpass')
+    expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-10 / 20))
     expect(graph.dryGain.gain.value).toBe(0)
     expect(graph.wetGain.gain.value).toBe(1)
   })
@@ -123,10 +125,11 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, bands, baselineCurve, true, false)
+    syncMonitorGraph(context, graph, bands, baselineCurve, true, false, -8)
 
     expect(graph.filterNodes).toHaveLength(2)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowpass')
+    expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
     expect(graph.dryGain.gain.value).toBe(1)
     expect(graph.wetGain.gain.value).toBe(0)
   })
@@ -135,13 +138,13 @@ describe('audio monitor graph', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
 
-    syncMonitorGraph(context, graph, [], baselineCurve, false, true)
+    syncMonitorGraph(context, graph, [], baselineCurve, false, true, -8)
     disconnectMonitorGraph(graph)
 
     expect(getConnections(graph.source)).toEqual([])
     expect(getConnections(graph.dryGain)).toEqual([])
     expect(getConnections(graph.wetInput)).toEqual([])
+    expect(getConnections(graph.preGainNode)).toEqual([])
     expect(getConnections(graph.wetGain)).toEqual([])
   })
 })
-

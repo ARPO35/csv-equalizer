@@ -43,6 +43,7 @@ type MonitorGraph = {
   source: MediaElementAudioSourceNode
   dryGain: GainNode
   wetInput: GainNode
+  preGainNode: GainNode
   wetGain: GainNode
   filterNodes: BiquadFilterNode[]
 }
@@ -61,6 +62,10 @@ function safeDisconnect(node: AudioNode) {
   } catch {
     // Ignore disconnect calls on already-detached nodes.
   }
+}
+
+function dbToLinear(db: number) {
+  return 10 ** (db / 20)
 }
 
 function sampleCurveGain(curve: CurvePoint[], frequencyHz: number) {
@@ -153,17 +158,20 @@ export function createMonitorGraph(
   const source = context.createMediaElementSource(audioElement)
   const dryGain = context.createGain()
   const wetInput = context.createGain()
+  const preGainNode = context.createGain()
   const wetGain = context.createGain()
 
   source.connect(dryGain)
   dryGain.connect(context.destination)
   source.connect(wetInput)
+  preGainNode.connect(wetGain)
   wetGain.connect(context.destination)
 
   return {
     source,
     dryGain,
     wetInput,
+    preGainNode,
     wetGain,
     filterNodes: [],
   } satisfies MonitorGraph
@@ -176,6 +184,7 @@ export function syncMonitorGraph(
   baselineCurve: CurvePoint[],
   monitorBypassed: boolean,
   monitorBaselineEnabled: boolean,
+  preGainDb: number,
 ) {
   safeDisconnect(graph.wetInput)
   graph.filterNodes.forEach((node) => safeDisconnect(node))
@@ -189,16 +198,17 @@ export function syncMonitorGraph(
   const filterNodes = [...baselineNodes, ...paramNodes]
 
   if (filterNodes.length === 0) {
-    graph.wetInput.connect(graph.wetGain)
+    graph.wetInput.connect(graph.preGainNode)
   } else {
     graph.wetInput.connect(filterNodes[0])
 
     filterNodes.forEach((node, index) => {
-      const nextNode = filterNodes[index + 1] ?? graph.wetGain
+      const nextNode = filterNodes[index + 1] ?? graph.preGainNode
       node.connect(nextNode)
     })
   }
 
+  graph.preGainNode.gain.value = dbToLinear(preGainDb)
   graph.dryGain.gain.value = monitorBypassed ? 1 : 0
   graph.wetGain.gain.value = monitorBypassed ? 0 : 1
   graph.filterNodes = filterNodes
@@ -208,6 +218,7 @@ export function disconnectMonitorGraph(graph: MonitorGraph) {
   safeDisconnect(graph.source)
   safeDisconnect(graph.dryGain)
   safeDisconnect(graph.wetInput)
+  safeDisconnect(graph.preGainNode)
   safeDisconnect(graph.wetGain)
   graph.filterNodes.forEach((node) => safeDisconnect(node))
 }
@@ -218,12 +229,14 @@ export function useEqPlaybackMonitor({
   baselineCurve,
   monitorBypassed,
   monitorBaselineEnabled,
+  preGainDb,
 }: {
   audioElement: HTMLAudioElement | null
   bands: EqBand[]
   baselineCurve: CurvePoint[]
   monitorBypassed: boolean
   monitorBaselineEnabled: boolean
+  preGainDb: number
 }) {
   const audioContextRef = useRef<AudioContext | null>(null)
   const graphRef = useRef<MonitorGraph | null>(null)
@@ -285,9 +298,10 @@ export function useEqPlaybackMonitor({
       baselineCurve,
       monitorBypassed,
       monitorBaselineEnabled,
+      preGainDb,
     )
     setErrorMessage(null)
-  }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed])
+  }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed, preGainDb])
 
   useEffect(() => {
     return () => {

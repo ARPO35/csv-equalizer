@@ -1,5 +1,6 @@
 import {
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -37,17 +38,13 @@ function EditorShell() {
   const { state, dispatch } = useEqEditor()
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
+  const [isEditingPreGain, setIsEditingPreGain] = useState(false)
+  const [preGainDraft, setPreGainDraft] = useState('')
+
   const activeBands = useMemo(
     () => state.bands.filter((band) => !band.isBypassed),
     [state.bands],
   )
-  const { errorMessage: monitorErrorMessage } = useEqPlaybackMonitor({
-    audioElement,
-    bands: state.bands,
-    baselineCurve: state.baselineCurve,
-    monitorBypassed: state.monitorBypassed,
-    monitorBaselineEnabled: state.monitorBaselineEnabled,
-  })
 
   const bandCurve = useMemo(
     () =>
@@ -63,6 +60,18 @@ function EditorShell() {
     [bandCurve, state.baselineCurve],
   )
 
+  const rawOutputPeakDb = useMemo(
+    () =>
+      outputCurve.length === 0
+        ? 0
+        : Math.max(...outputCurve.map((point) => point.gainDb)),
+    [outputCurve],
+  )
+  const autoPreGainDb = -8 - Math.max(0, rawOutputPeakDb)
+  const effectivePreGainDb =
+    state.preGainMode === 'auto' ? autoPreGainDb : state.manualPreGainDb
+  const postGainPeakDb = rawOutputPeakDb + effectivePreGainDb
+  const hasClipRisk = postGainPeakDb > 0
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
   const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
   const canExportCurve = outputCurve.length > 0
@@ -74,6 +83,14 @@ function EditorShell() {
     }),
     [state.bands, state.sourceFileName],
   )
+  const { errorMessage: monitorErrorMessage } = useEqPlaybackMonitor({
+    audioElement,
+    bands: state.bands,
+    baselineCurve: state.baselineCurve,
+    monitorBypassed: state.monitorBypassed,
+    monitorBaselineEnabled: state.monitorBaselineEnabled,
+    preGainDb: effectivePreGainDb,
+  })
 
   function getBaseFileName() {
     const sourceName = state.sourceFileName ?? 'flat-eq'
@@ -89,11 +106,26 @@ function EditorShell() {
     return negative ? -magnitude : magnitude
   }
 
+  function commitManualPreGain() {
+    const nextValue = Number(preGainDraft)
+    if (!Number.isNaN(nextValue)) {
+      dispatch({ type: 'set-manual-pre-gain-db', payload: nextValue })
+    }
+    setIsEditingPreGain(false)
+    setPreGainDraft('')
+  }
+
+  function startManualPreGainEdit() {
+    if (state.preGainMode !== 'manual') {
+      return
+    }
+
+    setIsEditingPreGain(true)
+    setPreGainDraft(state.manualPreGainDb.toFixed(1))
+  }
+
   const handleDeleteSelectedBand = useEffectEvent((event: KeyboardEvent) => {
-    if (
-      event.key !== 'Delete' &&
-      event.key !== 'Backspace'
-    ) {
+    if (event.key !== 'Delete' && event.key !== 'Backspace') {
       return
     }
 
@@ -192,6 +224,7 @@ function EditorShell() {
       const curve = parseCurveCsv(text)
       dispatch({ type: 'set-source-file-name', payload: file.name })
       dispatch({ type: 'set-baseline-curve', payload: curve })
+      dispatch({ type: 'set-monitor-baseline-enabled', payload: true })
       dispatch({ type: 'set-error', payload: undefined })
       setStatusMessage(`Loaded baseline EQ from ${file.name}.`)
     } catch (error) {
@@ -384,15 +417,54 @@ function EditorShell() {
                 <span>Bands</span>
                 <strong>{activeBands.length} / {state.bands.length}</strong>
               </article>
-              <article>
-                <span>Output peak</span>
-                <strong>
-                  {outputCurve.length === 0
-                    ? '0.0 dB'
-                    : formatDb(
-                        Math.max(...outputCurve.map((point) => point.gainDb)),
-                      )}
-                </strong>
+              <article className="pre-gain-card">
+                <span>Pre-Gain</span>
+                <div className="pre-gain-row">
+                  {isEditingPreGain && state.preGainMode === 'manual' ? (
+                    <input
+                      aria-label="Manual pre-gain"
+                      className="popover-input"
+                      type="number"
+                      autoFocus
+                      step={0.1}
+                      value={preGainDraft}
+                      onChange={(event) => setPreGainDraft(event.target.value)}
+                      onBlur={commitManualPreGain}
+                      onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                        if (event.key === 'Enter') {
+                          commitManualPreGain()
+                        }
+                        if (event.key === 'Escape') {
+                          setIsEditingPreGain(false)
+                          setPreGainDraft('')
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className={`pre-gain-value ${hasClipRisk ? 'is-danger' : ''}`}
+                      onDoubleClick={startManualPreGainEdit}
+                    >
+                      {formatDb(effectivePreGainDb)}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`chip-button ${state.preGainMode === 'manual' ? 'is-active' : ''}`}
+                    onClick={() =>
+                      dispatch({
+                        type: 'set-pre-gain-mode',
+                        payload: state.preGainMode === 'auto' ? 'manual' : 'auto',
+                      })
+                    }
+                  >
+                    {state.preGainMode === 'auto' ? 'Auto' : 'Manual'}
+                  </button>
+                </div>
+                <p className={`pre-gain-note ${hasClipRisk ? 'is-danger' : ''}`}>
+                  Peak after pre-gain: {formatDb(postGainPeakDb)}
+                </p>
               </article>
             </div>
           </section>
@@ -404,7 +476,8 @@ function EditorShell() {
               <li>Double-click inside the graph to create a band.</li>
               <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q.</li>
               <li>Use Band bypass to A/B nodes without deleting them.</li>
-              <li>Upload a monitor file and use Baseline monitor or Monitor bypass to A/B playback.</li>
+              <li>Use Baseline monitor or Monitor bypass to compare what you hear.</li>
+              <li>Switch Pre-Gain between Auto and Manual to control headroom.</li>
               <li>Save the preset with Ctrl+S and export the final output EQ.</li>
             </ol>
           </section>
@@ -454,9 +527,7 @@ function EditorShell() {
             viewMinDb={state.viewMinDb}
             viewMaxDb={state.viewMaxDb}
             onBandCommit={updateBand}
-            onBandCreate={(band) =>
-              dispatch({ type: 'add-band', payload: band })
-            }
+            onBandCreate={(band) => dispatch({ type: 'add-band', payload: band })}
             onBandDelete={handleRemoveBand}
             onBandToggleBypass={handleToggleBandBypass}
             onBandSelect={(bandId) =>
@@ -500,7 +571,7 @@ function EditorShell() {
                 <h3>{state.sourceFileName ? 'Imported baseline' : 'Flat baseline'}</h3>
                 <p>
                   {state.sourceFileName
-                    ? 'The imported EQ is preserved as the baseline. Nodes add a parametric delta on top of it.'
+                    ? 'The imported EQ is preserved in the graph and export. Baseline monitor only decides whether that curve is heard in playback.'
                     : 'No import is required. The graph starts from a flat 0 dB baseline across the full working grid.'}
                 </p>
               </div>
@@ -509,8 +580,7 @@ function EditorShell() {
                 <h3>{selectedBand ? 'Selected band' : 'No band selected'}</h3>
                 {selectedBand ? (
                   <p>
-                    {describeBand(selectedBand)} at{' '}
-                    {Math.round(selectedBand.frequencyHz)} Hz
+                    {describeBand(selectedBand)} at {Math.round(selectedBand.frequencyHz)} Hz
                     {'gainDb' in selectedBand
                       ? `, ${formatDb(selectedBand.gainDb)}`
                       : `, ${selectedBand.slopeDbPerOct} dB/oct`}
@@ -518,8 +588,7 @@ function EditorShell() {
                   </p>
                 ) : (
                   <p>
-                    Hover or click a node to pin its floating editor. Double-click
-                    the graph to create the first band.
+                    Hover or click a node to inspect it. Double-click the graph to create the first band.
                   </p>
                 )}
               </div>
@@ -532,9 +601,9 @@ function EditorShell() {
               <li>Double-click graph: create a peaking band at the cursor.</li>
               <li>Double-click node: delete that band.</li>
               <li>Double-click popover values: edit frequency, gain, Q or slope.</li>
+              <li>Double-click Manual Pre-Gain: edit the value inline.</li>
               <li>Band bypass affects the graph, export and monitor chain.</li>
-              <li>Baseline monitor only affects playback.</li>
-              <li>Monitor bypass only affects playback.</li>
+              <li>Baseline monitor and Monitor bypass only affect playback.</li>
               <li>Drag a bell node and use the mouse wheel to adjust Q.</li>
               <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
               <li>`Delete` / `Backspace`: remove the selected band.</li>
@@ -594,9 +663,3 @@ function App() {
 }
 
 export default App
-
-
-
-
-
-

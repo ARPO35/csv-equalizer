@@ -20,6 +20,7 @@ type EqEditorAction =
   | { type: 'toggle-band-bypass'; payload: { id: string } }
   | { type: 'toggle-monitor-bypass' }
   | { type: 'toggle-monitor-baseline' }
+  | { type: 'set-monitor-baseline-enabled'; payload: boolean }
   | { type: 'set-view-max-db'; payload: number }
   | { type: 'set-view-min-db'; payload: number }
   | { type: 'set-pre-gain-mode'; payload: 'auto' | 'manual' }
@@ -105,6 +106,11 @@ function eqEditorReducer(
         ...state,
         monitorBaselineEnabled: !state.monitorBaselineEnabled,
       }
+    case 'set-monitor-baseline-enabled':
+      return {
+        ...state,
+        monitorBaselineEnabled: action.payload,
+      }
     case 'set-view-max-db':
       return {
         ...state,
@@ -170,4 +176,3 @@ export function useEqEditor() {
   }
   return context
 }
-
