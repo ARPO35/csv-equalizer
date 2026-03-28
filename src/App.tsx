@@ -44,7 +44,9 @@ function EditorShell() {
   const { errorMessage: monitorErrorMessage } = useEqPlaybackMonitor({
     audioElement,
     bands: state.bands,
+    baselineCurve: state.baselineCurve,
     monitorBypassed: state.monitorBypassed,
+    monitorBaselineEnabled: state.monitorBaselineEnabled,
   })
 
   const bandCurve = useMemo(
@@ -331,6 +333,15 @@ function EditorShell() {
                 </button>
                 <button
                   type="button"
+                  className={`chip-button ${state.monitorBaselineEnabled ? 'is-active' : ''}`}
+                  aria-pressed={state.monitorBaselineEnabled}
+                  disabled={!state.sourceFileName}
+                  onClick={() => dispatch({ type: 'toggle-monitor-baseline' })}
+                >
+                  Baseline monitor
+                </button>
+                <button
+                  type="button"
                   className={`chip-button ${state.monitorBypassed ? 'is-active' : ''}`}
                   aria-pressed={state.monitorBypassed}
                   disabled={!state.audioFileName}
@@ -393,7 +404,7 @@ function EditorShell() {
               <li>Double-click inside the graph to create a band.</li>
               <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q.</li>
               <li>Use Band bypass to A/B nodes without deleting them.</li>
-              <li>Upload a monitor file and use Monitor bypass to compare wet vs dry playback.</li>
+              <li>Upload a monitor file and use Baseline monitor or Monitor bypass to A/B playback.</li>
               <li>Save the preset with Ctrl+S and export the final output EQ.</li>
             </ol>
           </section>
@@ -522,6 +533,7 @@ function EditorShell() {
               <li>Double-click node: delete that band.</li>
               <li>Double-click popover values: edit frequency, gain, Q or slope.</li>
               <li>Band bypass affects the graph, export and monitor chain.</li>
+              <li>Baseline monitor only affects playback.</li>
               <li>Monitor bypass only affects playback.</li>
               <li>Drag a bell node and use the mouse wheel to adjust Q.</li>
               <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
@@ -582,5 +594,9 @@ function App() {
 }
 
 export default App
+
+
+
+
 
 

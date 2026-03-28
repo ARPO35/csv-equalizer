@@ -1,7 +1,41 @@
 import { useEffect, useRef, useState } from 'react'
-import type { EqBand } from '../types'
+import type { CurvePoint, EqBand } from '../types'
 
 const CUT_Q = Math.SQRT1_2
+const GRAPH_EQ_Q = 4.318
+const GRAPH_EQ_CENTERS = [
+  20,
+  25,
+  31.5,
+  40,
+  50,
+  63,
+  80,
+  100,
+  125,
+  160,
+  200,
+  250,
+  315,
+  400,
+  500,
+  630,
+  800,
+  1000,
+  1250,
+  1600,
+  2000,
+  2500,
+  3150,
+  4000,
+  5000,
+  6300,
+  8000,
+  10000,
+  12500,
+  16000,
+  20000,
+]
 
 type AudioContextConstructor = new () => AudioContext
 
@@ -27,6 +61,35 @@ function safeDisconnect(node: AudioNode) {
   } catch {
     // Ignore disconnect calls on already-detached nodes.
   }
+}
+
+function sampleCurveGain(curve: CurvePoint[], frequencyHz: number) {
+  if (curve.length === 0) {
+    return 0
+  }
+
+  if (frequencyHz <= curve[0].frequencyHz) {
+    return curve[0].gainDb
+  }
+
+  if (frequencyHz >= curve[curve.length - 1].frequencyHz) {
+    return curve[curve.length - 1].gainDb
+  }
+
+  for (let index = 0; index < curve.length - 1; index += 1) {
+    const left = curve[index]
+    const right = curve[index + 1]
+
+    if (frequencyHz >= left.frequencyHz && frequencyHz <= right.frequencyHz) {
+      const leftLog = Math.log10(left.frequencyHz)
+      const rightLog = Math.log10(right.frequencyHz)
+      const targetLog = Math.log10(frequencyHz)
+      const ratio = (targetLog - leftLog) / (rightLog - leftLog)
+      return left.gainDb + (right.gainDb - left.gainDb) * ratio
+    }
+  }
+
+  return 0
 }
 
 function createFilterNodesForBand(context: AudioContext, band: EqBand) {
@@ -58,6 +121,31 @@ function createFilterNodesForBand(context: AudioContext, band: EqBand) {
   })
 }
 
+export function createGraphEqNodes(
+  context: AudioContext,
+  baselineCurve: CurvePoint[],
+) {
+  return GRAPH_EQ_CENTERS.map((center, index) => {
+    const filter = context.createBiquadFilter()
+    filter.frequency.value = center
+    filter.gain.value = sampleCurveGain(baselineCurve, center)
+
+    if (index === 0) {
+      filter.type = 'lowshelf'
+      return filter
+    }
+
+    if (index === GRAPH_EQ_CENTERS.length - 1) {
+      filter.type = 'highshelf'
+      return filter
+    }
+
+    filter.type = 'peaking'
+    filter.Q.value = GRAPH_EQ_Q
+    return filter
+  })
+}
+
 export function createMonitorGraph(
   context: AudioContext,
   audioElement: HTMLAudioElement,
@@ -85,15 +173,20 @@ export function syncMonitorGraph(
   context: AudioContext,
   graph: MonitorGraph,
   bands: EqBand[],
+  baselineCurve: CurvePoint[],
   monitorBypassed: boolean,
+  monitorBaselineEnabled: boolean,
 ) {
   safeDisconnect(graph.wetInput)
   graph.filterNodes.forEach((node) => safeDisconnect(node))
 
-  const activeBands = bands.filter((band) => !band.isBypassed)
-  const filterNodes = activeBands.flatMap((band) =>
-    createFilterNodesForBand(context, band),
-  )
+  const baselineNodes = monitorBaselineEnabled
+    ? createGraphEqNodes(context, baselineCurve)
+    : []
+  const paramNodes = bands
+    .filter((band) => !band.isBypassed)
+    .flatMap((band) => createFilterNodesForBand(context, band))
+  const filterNodes = [...baselineNodes, ...paramNodes]
 
   if (filterNodes.length === 0) {
     graph.wetInput.connect(graph.wetGain)
@@ -122,11 +215,15 @@ export function disconnectMonitorGraph(graph: MonitorGraph) {
 export function useEqPlaybackMonitor({
   audioElement,
   bands,
+  baselineCurve,
   monitorBypassed,
+  monitorBaselineEnabled,
 }: {
   audioElement: HTMLAudioElement | null
   bands: EqBand[]
+  baselineCurve: CurvePoint[]
   monitorBypassed: boolean
+  monitorBaselineEnabled: boolean
 }) {
   const audioContextRef = useRef<AudioContext | null>(null)
   const graphRef = useRef<MonitorGraph | null>(null)
@@ -181,9 +278,16 @@ export function useEqPlaybackMonitor({
       return
     }
 
-    syncMonitorGraph(context, graph, bands, monitorBypassed)
+    syncMonitorGraph(
+      context,
+      graph,
+      bands,
+      baselineCurve,
+      monitorBypassed,
+      monitorBaselineEnabled,
+    )
     setErrorMessage(null)
-  }, [bands, monitorBypassed])
+  }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed])
 
   useEffect(() => {
     return () => {
