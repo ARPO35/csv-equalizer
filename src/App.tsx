@@ -13,6 +13,7 @@ import { useEqPlaybackMonitor } from './lib/audio-monitor'
 import { describeBand, sortBandsByFrequency } from './lib/bands'
 import { parseCurveCsv } from './lib/csv'
 import { computeEqCurve, sumCurveWithEq } from './lib/eq'
+import { computeAutoPreGainDb } from './lib/pre-gain'
 import {
   saveTextFile,
   serializeCurveCsv,
@@ -67,7 +68,7 @@ function EditorShell() {
         : Math.max(...outputCurve.map((point) => point.gainDb)),
     [outputCurve],
   )
-  const autoPreGainDb = -8 - Math.max(0, rawOutputPeakDb)
+  const autoPreGainDb = computeAutoPreGainDb(rawOutputPeakDb)
   const effectivePreGainDb =
     state.preGainMode === 'auto' ? autoPreGainDb : state.manualPreGainDb
   const postGainPeakDb = rawOutputPeakDb + effectivePreGainDb
