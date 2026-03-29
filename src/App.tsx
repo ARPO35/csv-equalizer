@@ -471,7 +471,7 @@ function EditorShell() {
             <ol className="workflow-list">
               <li>Import a baseline EQ or stay on the flat default curve.</li>
               <li>Double-click inside the graph to create a band.</li>
-              <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q.</li>
+              <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q or slope.</li>
               <li>Use Band bypass to A/B nodes without deleting them.</li>
               <li>Use Baseline monitor or Monitor bypass to compare what you hear.</li>
               <li>Switch Pre-Gain between Auto and Manual to control headroom.</li>
@@ -601,7 +601,7 @@ function EditorShell() {
               <li>Double-click Manual Pre-Gain: edit the value inline.</li>
               <li>Band bypass affects the graph, export and monitor chain.</li>
               <li>Baseline monitor and Monitor bypass only affect playback.</li>
-              <li>Drag a bell node and use the mouse wheel to adjust Q.</li>
+              <li>Drag a bell node to adjust Q, or drag shelf/cut nodes to adjust slope.</li>
               <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
               <li>`Delete` / `Backspace`: remove the selected band.</li>
             </ul>

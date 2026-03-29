@@ -111,6 +111,23 @@ function getNearestStep<T extends number>(value: number, steps: readonly T[]): T
   return nearest
 }
 
+function getNextSlope<T extends number>(
+  current: T,
+  direction: number,
+  values: readonly T[],
+) {
+  const currentIndex = values.indexOf(current)
+  if (currentIndex < 0) {
+    return current
+  }
+
+  const nextIndex = Math.min(
+    values.length - 1,
+    Math.max(0, currentIndex + direction),
+  )
+  return values[nextIndex]
+}
+
 function updateBandField(
   band: EqBand,
   field: EditableField,
@@ -308,15 +325,56 @@ export function EqChart({
   }
 
   function handleChartWheel(event: WheelEvent<HTMLDivElement>) {
-    if (!draggingBand || draggingBand.type !== 'peaking' || event.deltaY === 0) {
+    if (!draggingBand || event.deltaY === 0) {
       return
     }
 
     event.preventDefault()
     const direction = event.deltaY < 0 ? 1 : -1
+
+    if (draggingBand.type === 'peaking') {
+      onBandCommit({
+        ...draggingBand,
+        q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
+      })
+      return
+    }
+
+    if (draggingBand.type === 'lowCut' || draggingBand.type === 'highCut') {
+      const nextSlope = getNextSlope(
+        draggingBand.slopeDbPerOct,
+        direction,
+        CUT_SLOPE_VALUES,
+      )
+
+      if (nextSlope === draggingBand.slopeDbPerOct) {
+        return
+      }
+
+      onBandCommit({
+        ...draggingBand,
+        slopeDbPerOct: nextSlope,
+      })
+      return
+    }
+
+    if (draggingBand.type !== 'lowShelf' && draggingBand.type !== 'highShelf') {
+      return
+    }
+
+    const nextSlope = getNextSlope(
+      draggingBand.slopeDbPerOct,
+      direction,
+      MUSICAL_SLOPE_VALUES,
+    )
+
+    if (nextSlope === draggingBand.slopeDbPerOct) {
+      return
+    }
+
     onBandCommit({
       ...draggingBand,
-      q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
+      slopeDbPerOct: nextSlope,
     })
   }
 
@@ -690,40 +748,44 @@ export function EqChart({
             </div>
           ) : null}
 
-          {'slopeDbPerOct' in popupBand ? (
-            <div className="popover-row">
-              <span>Slope</span>
-              {editingField === 'slopeDbPerOct' ? (
-                <input
-                  aria-label="Slope"
-                  className="popover-input"
-                  type="number"
-                  autoFocus
-                  step={12}
-                  value={editingDraft}
-                  onChange={(event) => setEditingDraft(event.target.value)}
-                  onBlur={commitEditing}
-                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                    if (event.key === 'Enter') {
-                      commitEditing()
-                    }
-                    if (event.key === 'Escape') {
-                      stopEditing()
-                    }
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="popover-value"
-                  aria-label="Edit slope"
-                  onDoubleClick={() => startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())}
-                >
-                  {popupBand.slopeDbPerOct} dB/oct
-                </button>
-              )}
-            </div>
-          ) : null}
+          <div className="popover-row">
+            <span>Slope</span>
+            {editingField === 'slopeDbPerOct' ? (
+              <input
+                aria-label="Slope"
+                className="popover-input"
+                type="number"
+                autoFocus
+                step={
+                  popupBand.type === 'lowCut' || popupBand.type === 'highCut'
+                    ? 12
+                    : 6
+                }
+                value={editingDraft}
+                onChange={(event) => setEditingDraft(event.target.value)}
+                onBlur={commitEditing}
+                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                  if (event.key === 'Enter') {
+                    commitEditing()
+                  }
+                  if (event.key === 'Escape') {
+                    stopEditing()
+                  }
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                className="popover-value"
+                aria-label="Edit slope"
+                onDoubleClick={() =>
+                  startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())
+                }
+              >
+                {popupBand.slopeDbPerOct} dB/oct
+              </button>
+            )}
+          </div>
         </div>
       ) : null}
     </div>

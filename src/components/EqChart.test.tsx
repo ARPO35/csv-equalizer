@@ -174,6 +174,83 @@ describe('EqChart', () => {
     expect(onBandCommit).not.toHaveBeenCalled()
   })
 
+  it('adjusts shelf slope with the mouse wheel while dragging', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'lowShelf',
+      frequencyHz: 180,
+      isBypassed: false,
+      gainDb: 4,
+      slopeDbPerOct: 12,
+    }
+
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const chart = within(container)
+    const node = chart.getByLabelText('Low shelf band')
+    const chartFrame = container.querySelector('.chart-frame')
+
+    expect(chartFrame).toBeTruthy()
+
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+
+    fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
+
+    expect(onBandCommit).toHaveBeenCalledWith({
+      ...band,
+      slopeDbPerOct: 18,
+    })
+  })
+
+  it('adjusts cut slope with the mouse wheel while dragging', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'lowCut',
+      frequencyHz: 120,
+      isBypassed: false,
+      slopeDbPerOct: 24,
+    }
+
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const chart = within(container)
+    const node = chart.getByLabelText('Low cut band')
+    const chartFrame = container.querySelector('.chart-frame')
+
+    expect(chartFrame).toBeTruthy()
+
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+
+    fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
+
+    expect(onBandCommit).toHaveBeenCalledWith({
+      ...band,
+      slopeDbPerOct: 36,
+    })
+  })
+
   it('toggles band bypass from the popover', async () => {
     const user = userEvent.setup()
     const onBandToggleBypass = vi.fn()
