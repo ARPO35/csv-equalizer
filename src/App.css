@@ -460,6 +460,21 @@
   font-size: 0.88rem;
 }
 
+.popover-row select {
+  color-scheme: dark;
+  background-color: rgba(11, 15, 22, 0.92);
+}
+
+.popover-row select:focus {
+  outline: none;
+  border-color: rgba(255, 205, 98, 0.45);
+}
+
+.popover-row select option {
+  background: #0b1016;
+  color: var(--text);
+}
+
 .popover-value {
   border: none;
   background: transparent;
