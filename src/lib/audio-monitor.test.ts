@@ -112,7 +112,7 @@ describe('audio monitor graph', () => {
     expect(graph.wetGain.gain.value).toBe(1)
   })
 
-  it('skips baseline graph EQ nodes when the monitor toggle is disabled', () => {
+  it('keeps pre-gain active and bypasses EQ filters when monitor bypass is enabled', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const bands: EqBand[] = [
@@ -127,11 +127,13 @@ describe('audio monitor graph', () => {
 
     syncMonitorGraph(context, graph, bands, baselineCurve, true, false, -8)
 
-    expect(graph.filterNodes).toHaveLength(2)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowpass')
+    expect(graph.filterNodes).toHaveLength(0)
+    expect(getConnections(graph.wetInput)).toEqual([
+      graph.preGainNode as unknown as FakeAudioNode,
+    ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
-    expect(graph.dryGain.gain.value).toBe(1)
-    expect(graph.wetGain.gain.value).toBe(0)
+    expect(graph.dryGain.gain.value).toBe(0)
+    expect(graph.wetGain.gain.value).toBe(1)
   })
 
   it('disconnects the monitor graph cleanly', () => {

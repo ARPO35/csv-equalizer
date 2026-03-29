@@ -189,12 +189,16 @@ export function syncMonitorGraph(
   safeDisconnect(graph.wetInput)
   graph.filterNodes.forEach((node) => safeDisconnect(node))
 
-  const baselineNodes = monitorBaselineEnabled
-    ? createGraphEqNodes(context, baselineCurve)
+  const shouldApplyEq = !monitorBypassed
+  const baselineNodes =
+    shouldApplyEq && monitorBaselineEnabled
+      ? createGraphEqNodes(context, baselineCurve)
+      : []
+  const paramNodes = shouldApplyEq
+    ? bands
+        .filter((band) => !band.isBypassed)
+        .flatMap((band) => createFilterNodesForBand(context, band))
     : []
-  const paramNodes = bands
-    .filter((band) => !band.isBypassed)
-    .flatMap((band) => createFilterNodesForBand(context, band))
   const filterNodes = [...baselineNodes, ...paramNodes]
 
   if (filterNodes.length === 0) {
@@ -209,8 +213,8 @@ export function syncMonitorGraph(
   }
 
   graph.preGainNode.gain.value = dbToLinear(preGainDb)
-  graph.dryGain.gain.value = monitorBypassed ? 1 : 0
-  graph.wetGain.gain.value = monitorBypassed ? 0 : 1
+  graph.dryGain.gain.value = 0
+  graph.wetGain.gain.value = 1
   graph.filterNodes = filterNodes
 }
 
