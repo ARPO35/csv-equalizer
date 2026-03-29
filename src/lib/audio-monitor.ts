@@ -101,7 +101,8 @@ function createFilterNodesForBand(context: AudioContext, band: EqBand) {
   const stageCount =
     band.type === 'lowCut' || band.type === 'highCut'
       ? band.slopeDbPerOct / 12
-      : 1
+      : band.slopeDbPerOct / 6
+  const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
 
   return Array.from({ length: stageCount }, () => {
     const filter = context.createBiquadFilter()
@@ -109,14 +110,14 @@ function createFilterNodesForBand(context: AudioContext, band: EqBand) {
 
     if (band.type === 'peaking') {
       filter.type = 'peaking'
-      filter.gain.value = band.gainDb
+      filter.gain.value = stageGainDb ?? band.gainDb
       filter.Q.value = band.q
       return filter
     }
 
     if (band.type === 'lowShelf' || band.type === 'highShelf') {
       filter.type = band.type === 'lowShelf' ? 'lowshelf' : 'highshelf'
-      filter.gain.value = band.gainDb
+      filter.gain.value = stageGainDb ?? band.gainDb
       return filter
     }
 

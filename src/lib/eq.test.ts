@@ -78,6 +78,7 @@ describe('computeEqCurve', () => {
         isBypassed: false,
         gainDb: 6,
         q: 1,
+        slopeDbPerOct: 12,
       },
     ]
 

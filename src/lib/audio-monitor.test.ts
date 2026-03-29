@@ -91,6 +91,7 @@ describe('audio monitor graph', () => {
         isBypassed: true,
         gainDb: 4,
         q: 1.1,
+        slopeDbPerOct: 12,
       },
       {
         id: 'band-2',
@@ -134,6 +135,27 @@ describe('audio monitor graph', () => {
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
     expect(graph.dryGain.gain.value).toBe(0)
     expect(graph.wetGain.gain.value).toBe(1)
+  })
+
+  it('builds stacked filter stages for shelf slopes in the monitor chain', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+    const bands: EqBand[] = [
+      {
+        id: 'band-1',
+        type: 'lowShelf',
+        frequencyHz: 120,
+        isBypassed: false,
+        gainDb: 6,
+        slopeDbPerOct: 30,
+      },
+    ]
+
+    syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8)
+
+    expect(graph.filterNodes).toHaveLength(5)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBeCloseTo(1.2)
   })
 
   it('disconnects the monitor graph cleanly', () => {

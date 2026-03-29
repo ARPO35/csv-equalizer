@@ -37,6 +37,7 @@ function magnitudesToDbResponse(
 function createSingleFilterResponse(
   band: EqBand,
   frequencies: number[],
+  gainDbOverride?: number,
 ): CurvePoint[] {
   const context = getAudioContext()
   const filter = context.createBiquadFilter()
@@ -44,11 +45,11 @@ function createSingleFilterResponse(
 
   if (band.type === 'peaking') {
     filter.type = 'peaking'
-    filter.gain.value = band.gainDb
+    filter.gain.value = gainDbOverride ?? band.gainDb
     filter.Q.value = band.q
   } else if (band.type === 'lowShelf' || band.type === 'highShelf') {
     filter.type = band.type === 'lowShelf' ? 'lowshelf' : 'highshelf'
-    filter.gain.value = band.gainDb
+    filter.gain.value = gainDbOverride ?? band.gainDb
   } else {
     filter.type = band.type === 'lowCut' ? 'highpass' : 'lowpass'
     filter.Q.value = CUT_Q
@@ -62,14 +63,27 @@ function createSingleFilterResponse(
   return magnitudesToDbResponse(frequencies, magnitudes)
 }
 
-function computeCutResponse(
-  band: Extract<EqBand, { type: 'lowCut' | 'highCut' }>,
+function getStageCount(band: EqBand) {
+  if (band.type === 'lowCut' || band.type === 'highCut') {
+    return band.slopeDbPerOct / 12
+  }
+  return band.slopeDbPerOct / 6
+}
+
+function computeStageResponse(
+  band: EqBand,
   frequencies: number[],
 ): CurvePoint[] {
-  const stageCount = band.slopeDbPerOct / 12
+  const stageCount = getStageCount(band)
+  const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
+
   return Array.from({ length: stageCount }).reduce<CurvePoint[] | null>(
     (sumCurve) => {
-      const stageCurve = createSingleFilterResponse(band, frequencies)
+      const stageCurve = createSingleFilterResponse(
+        band,
+        frequencies,
+        stageGainDb,
+      )
       if (!sumCurve) {
         return stageCurve
       }
@@ -84,10 +98,7 @@ function computeCutResponse(
 }
 
 function computeBandResponse(band: EqBand, frequencies: number[]) {
-  if (band.type === 'lowCut' || band.type === 'highCut') {
-    return computeCutResponse(band, frequencies)
-  }
-  return createSingleFilterResponse(band, frequencies)
+  return computeStageResponse(band, frequencies)
 }
 
 export function computeEqCurve(

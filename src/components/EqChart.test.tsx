@@ -79,6 +79,7 @@ describe('EqChart', () => {
       isBypassed: false,
       gainDb: 3,
       q: 1.1,
+      slopeDbPerOct: 12,
     }
 
     renderChart({
@@ -105,6 +106,7 @@ describe('EqChart', () => {
       isBypassed: false,
       gainDb: 3,
       q: 1.1,
+      slopeDbPerOct: 12,
     }
 
     const { container } = renderChart({
@@ -136,6 +138,7 @@ describe('EqChart', () => {
       isBypassed: false,
       gainDb: 3,
       q: 1.1,
+      slopeDbPerOct: 12,
     }
 
     const { container } = renderChart({
@@ -181,6 +184,7 @@ describe('EqChart', () => {
       isBypassed: true,
       gainDb: 3,
       q: 1.1,
+      slopeDbPerOct: 12,
     }
 
     renderChart({
@@ -204,6 +208,7 @@ describe('EqChart', () => {
       isBypassed: false,
       gainDb: 3,
       q: 1.1,
+      slopeDbPerOct: 12,
     }
 
     renderChart({

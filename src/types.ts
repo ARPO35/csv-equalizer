@@ -3,6 +3,9 @@ export type CurvePoint = {
   gainDb: number
 }
 
+export type MusicalSlopeDbPerOct = 6 | 12 | 18 | 24 | 30 | 36 | 42 | 48
+export type CutSlopeDbPerOct = 12 | 24 | 36 | 48
+
 type BaseBand = {
   id: string
   frequencyHz: number
@@ -13,16 +16,18 @@ export type PeakingBand = BaseBand & {
   type: 'peaking'
   gainDb: number
   q: number
+  slopeDbPerOct: MusicalSlopeDbPerOct
 }
 
 export type ShelfBand = BaseBand & {
   type: 'lowShelf' | 'highShelf'
   gainDb: number
+  slopeDbPerOct: MusicalSlopeDbPerOct
 }
 
 export type CutBand = BaseBand & {
   type: 'lowCut' | 'highCut'
-  slopeDbPerOct: 12 | 24 | 36 | 48
+  slopeDbPerOct: CutSlopeDbPerOct
 }
 
 export type EqBand = PeakingBand | ShelfBand | CutBand

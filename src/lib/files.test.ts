@@ -24,6 +24,7 @@ describe('file serialization helpers', () => {
             isBypassed: true,
             gainDb: 2,
             q: 1,
+            slopeDbPerOct: 12,
           },
         ],
       }),

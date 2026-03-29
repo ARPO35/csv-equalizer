@@ -26,6 +26,8 @@ const GRID_FREQUENCIES = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20
 const MIN_Q = 0.1
 const MAX_Q = 12
 const WHEEL_Q_STEP = 0.05
+const MUSICAL_SLOPE_VALUES = [6, 12, 18, 24, 30, 36, 42, 48] as const
+const CUT_SLOPE_VALUES = [12, 24, 36, 48] as const
 
 type EditableField = 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct'
 
@@ -102,6 +104,13 @@ function roundQ(value: number) {
   return Number(value.toFixed(2))
 }
 
+function getNearestStep<T extends number>(value: number, steps: readonly T[]): T {
+  const nearest = steps.reduce((best, current) =>
+    Math.abs(current - value) < Math.abs(best - value) ? current : best,
+  )
+  return nearest
+}
+
 function updateBandField(
   band: EqBand,
   field: EditableField,
@@ -133,13 +142,23 @@ function updateBandField(
     }
   }
 
-  if (field === 'slopeDbPerOct' && 'slopeDbPerOct' in band) {
-    const nextSlope = [12, 24, 36, 48].includes(numericValue)
-      ? (numericValue as 12 | 24 | 36 | 48)
-      : band.slopeDbPerOct
-    return {
-      ...band,
-      slopeDbPerOct: nextSlope,
+  if (field === 'slopeDbPerOct') {
+    if (band.type === 'lowCut' || band.type === 'highCut') {
+      return {
+        ...band,
+        slopeDbPerOct: getNearestStep(numericValue, CUT_SLOPE_VALUES),
+      }
+    }
+
+    if (
+      band.type === 'peaking' ||
+      band.type === 'lowShelf' ||
+      band.type === 'highShelf'
+    ) {
+      return {
+        ...band,
+        slopeDbPerOct: getNearestStep(numericValue, MUSICAL_SLOPE_VALUES),
+      }
     }
   }
 
