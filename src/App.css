@@ -114,6 +114,59 @@
   color: var(--text);
 }
 
+.pre-gain-card {
+  grid-column: span 2;
+}
+
+.pre-gain-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.pre-gain-value {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: default;
+  font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.pre-gain-value.is-danger {
+  color: #ff8d88;
+}
+
+.pre-gain-input {
+  width: 7.2rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  margin: 0;
+  outline: none;
+  box-shadow: none;
+  font-family: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.pre-gain-input::-webkit-outer-spin-button,
+.pre-gain-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.pre-gain-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .workflow-list,
 .shortcut-list {
   margin: 0.75rem 0 0;

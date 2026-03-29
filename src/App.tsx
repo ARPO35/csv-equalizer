@@ -71,8 +71,7 @@ function EditorShell() {
   const autoPreGainDb = computeAutoPreGainDb(rawOutputPeakDb)
   const effectivePreGainDb =
     state.preGainMode === 'auto' ? autoPreGainDb : state.manualPreGainDb
-  const postGainPeakDb = rawOutputPeakDb + effectivePreGainDb
-  const hasClipRisk = postGainPeakDb > 0
+  const hasClipRisk = rawOutputPeakDb + effectivePreGainDb > 0
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
   const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
   const canExportCurve = outputCurve.length > 0
@@ -424,7 +423,7 @@ function EditorShell() {
                   {isEditingPreGain && state.preGainMode === 'manual' ? (
                     <input
                       aria-label="Manual pre-gain"
-                      className="popover-input"
+                      className="pre-gain-input"
                       type="number"
                       autoFocus
                       step={0.1}
@@ -463,9 +462,6 @@ function EditorShell() {
                     {state.preGainMode === 'auto' ? 'Auto' : 'Manual'}
                   </button>
                 </div>
-                <p className={`pre-gain-note ${hasClipRisk ? 'is-danger' : ''}`}>
-                  Peak after pre-gain: {formatDb(postGainPeakDb)}
-                </p>
               </article>
             </div>
           </section>
