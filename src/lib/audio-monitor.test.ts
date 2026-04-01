@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FFT_ANALYSER_MAX_DB,
+  FFT_ANALYSER_MIN_DB,
   createGraphEqNodes,
   createMonitorGraph,
   disconnectMonitorGraph,
+  mapFrequencyDataToSpectrum,
   syncMonitorGraph,
 } from './audio-monitor'
 import type { CurvePoint, EqBand } from '../types'
@@ -31,6 +34,27 @@ class FakeBiquadFilterNode extends FakeAudioNode {
   Q = { value: 1 }
 }
 
+class FakeAnalyserNode extends FakeAudioNode {
+  #fftSize = 2048
+  minDecibels = -100
+  maxDecibels = -30
+  smoothingTimeConstant = 0.8
+  frequencyBinCount = this.#fftSize / 2
+
+  get fftSize() {
+    return this.#fftSize
+  }
+
+  set fftSize(value: number) {
+    this.#fftSize = value
+    this.frequencyBinCount = value / 2
+  }
+
+  getFloatFrequencyData(array: Float32Array) {
+    array.fill(-48)
+  }
+}
+
 class FakeMediaElementSourceNode extends FakeAudioNode {}
 
 function getConnections(node: unknown) {
@@ -39,6 +63,7 @@ function getConnections(node: unknown) {
 
 class FakeAudioContext {
   destination = new FakeAudioNode()
+  sampleRate = 48_000
 
   createGain() {
     return new FakeGainNode()
@@ -46,6 +71,10 @@ class FakeAudioContext {
 
   createBiquadFilter() {
     return new FakeBiquadFilterNode()
+  }
+
+  createAnalyser() {
+    return new FakeAnalyserNode()
   }
 
   createMediaElementSource() {
@@ -66,8 +95,14 @@ describe('audio monitor graph', () => {
 
     expect(getConnections(graph.source)).toHaveLength(2)
     expect(getConnections(graph.dryGain)).toEqual([context.destination])
-    expect(getConnections(graph.preGainNode)).toEqual([graph.wetGain as unknown as FakeAudioNode])
-    expect(getConnections(graph.wetGain)).toEqual([context.destination])
+    expect(getConnections(graph.wetGain)).toEqual([
+      context.destination,
+      graph.postAnalyser as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(graph.preGainNode)).toEqual([])
+    expect(graph.preAnalyser.fftSize).toBe(8192)
+    expect(graph.preAnalyser.minDecibels).toBe(FFT_ANALYSER_MIN_DB)
+    expect(graph.postAnalyser.maxDecibels).toBe(FFT_ANALYSER_MAX_DB)
   })
 
   it('builds a fixed graph EQ bank from the imported baseline curve', () => {
@@ -108,6 +143,10 @@ describe('audio monitor graph', () => {
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
     expect((graph.filterNodes[30] as unknown as FakeBiquadFilterNode).type).toBe('highshelf')
     expect((graph.filterNodes[31] as unknown as FakeBiquadFilterNode).type).toBe('lowpass')
+    expect(getConnections(graph.preGainNode)).toEqual([
+      graph.preAnalyser as unknown as FakeAudioNode,
+      graph.filterNodes[0] as unknown as FakeAudioNode,
+    ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-10 / 20))
     expect(graph.dryGain.gain.value).toBe(0)
     expect(graph.wetGain.gain.value).toBe(1)
@@ -131,6 +170,10 @@ describe('audio monitor graph', () => {
     expect(graph.filterNodes).toHaveLength(0)
     expect(getConnections(graph.wetInput)).toEqual([
       graph.preGainNode as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(graph.preGainNode)).toEqual([
+      graph.preAnalyser as unknown as FakeAudioNode,
+      graph.wetGain as unknown as FakeAudioNode,
     ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
     expect(graph.dryGain.gain.value).toBe(0)
@@ -170,5 +213,36 @@ describe('audio monitor graph', () => {
     expect(getConnections(graph.wetInput)).toEqual([])
     expect(getConnections(graph.preGainNode)).toEqual([])
     expect(getConnections(graph.wetGain)).toEqual([])
+  })
+
+  it('keeps low-frequency points unsmoothed when fewer than two FFT bins fall in-band', () => {
+    const frequencyData = Float32Array.from([-18, -90, -90, -90])
+    const spectrum = mapFrequencyDataToSpectrum(
+      frequencyData,
+      24_000,
+      [40],
+      FFT_ANALYSER_MIN_DB,
+    )
+
+    expect(spectrum[0].frequencyHz).toBe(40)
+    expect(spectrum[0].levelDb).toBeCloseTo(-18.48, 1)
+  })
+
+  it('applies overlapping max smoothing on the dense log trace to preserve narrow peaks', () => {
+    const frequencyData = new Float32Array(200).fill(-90)
+    frequencyData[99] = -18
+    frequencyData[100] = -30
+    frequencyData[101] = -24
+
+    const spectrum = mapFrequencyDataToSpectrum(
+      frequencyData,
+      24_000,
+      [11_880, 12_000, 12_120],
+      FFT_ANALYSER_MIN_DB,
+    )
+
+    expect(spectrum[0]).toEqual({ frequencyHz: 11_880, levelDb: -18 })
+    expect(spectrum[1]).toEqual({ frequencyHz: 12_000, levelDb: -18 })
+    expect(spectrum[2]).toEqual({ frequencyHz: 12_120, levelDb: -24 })
   })
 })

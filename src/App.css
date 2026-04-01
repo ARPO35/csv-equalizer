@@ -254,6 +254,14 @@
   background: var(--curve-preview);
 }
 
+.legend-fft-pre::before {
+  background: var(--curve-fft-pre);
+}
+
+.legend-fft-post::before {
+  background: var(--curve-fft-post);
+}
+
 .chart-frame {
   min-height: 0;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -321,6 +329,7 @@
   stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
+  pointer-events: none;
 }
 
 .curve-source {
@@ -333,6 +342,23 @@
 
 .curve-preview {
   stroke: var(--curve-preview);
+}
+
+.fft-overlay-fill {
+  fill: rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+.curve-fft-pre-line {
+  stroke: var(--curve-fft-pre);
+  stroke-width: 1.9;
+}
+
+.curve-fft-post-segment {
+  stroke: var(--curve-fft-post);
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  pointer-events: none;
 }
 
 .band-node {

@@ -3,6 +3,16 @@ export type CurvePoint = {
   gainDb: number
 }
 
+export type SpectrumPoint = {
+  frequencyHz: number
+  levelDb: number
+}
+
+export type FftOverlay = {
+  preSpectrum: SpectrumPoint[]
+  postSpectrum: SpectrumPoint[]
+}
+
 export type MusicalSlopeDbPerOct = 6 | 12 | 18 | 24 | 30 | 36 | 42 | 48
 export type CutSlopeDbPerOct = 12 | 24 | 36 | 48
 

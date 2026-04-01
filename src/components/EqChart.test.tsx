@@ -3,9 +3,21 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EqChart } from './EqChart'
 import { createFlatCurve } from '../lib/curve'
-import type { EqBand } from '../types'
+import type { EqBand, FftOverlay } from '../types'
 
 const baselineCurve = createFlatCurve([20, 1000, 20000])
+const fftOverlay: FftOverlay = {
+  preSpectrum: [
+    { frequencyHz: 20, levelDb: -60 },
+    { frequencyHz: 1000, levelDb: -36 },
+    { frequencyHz: 20000, levelDb: -54 },
+  ],
+  postSpectrum: [
+    { frequencyHz: 20, levelDb: -54 },
+    { frequencyHz: 1000, levelDb: -34 },
+    { frequencyHz: 20000, levelDb: -54.2 },
+  ],
+}
 
 function renderChart(
   overrides: Partial<React.ComponentProps<typeof EqChart>> = {},
@@ -323,6 +335,30 @@ describe('EqChart', () => {
 
     expect(onIncreaseViewMax).toHaveBeenCalledTimes(1)
     expect(onDecreaseViewMin).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders FFT overlay layers when spectrum data is available', () => {
+    renderChart({ fftOverlay, showFlatHint: false })
+
+    expect(screen.getByTestId('fft-pre-fill')).toBeTruthy()
+    expect(screen.getByTestId('fft-pre-line')).toBeTruthy()
+    expect(screen.getAllByTestId('fft-post-segment')).toHaveLength(2)
+  })
+
+  it('hides yellow FFT segments when post and pre responses are nearly identical', () => {
+    renderChart({
+      fftOverlay: {
+        preSpectrum: fftOverlay.preSpectrum,
+        postSpectrum: [
+          { frequencyHz: 20, levelDb: -60.1 },
+          { frequencyHz: 1000, levelDb: -35.7 },
+          { frequencyHz: 20000, levelDb: -54.2 },
+        ],
+      },
+      showFlatHint: false,
+    })
+
+    expect(screen.queryByTestId('fft-post-segment')).toBeNull()
   })
 })
 

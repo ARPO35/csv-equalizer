@@ -9,8 +9,18 @@ import {
   useRef,
   useState,
 } from 'react'
+import {
+  FFT_ANALYSER_MAX_DB,
+  FFT_ANALYSER_MIN_DB,
+} from '../lib/audio-monitor'
 import { convertBandType, createDefaultBand, describeBand } from '../lib/bands'
-import type { CurvePoint, EqBand, EqBandType } from '../types'
+import type {
+  CurvePoint,
+  EqBand,
+  EqBandType,
+  FftOverlay,
+  SpectrumPoint,
+} from '../types'
 
 const VIEWBOX_WIDTH = 1200
 const VIEWBOX_HEIGHT = 700
@@ -28,6 +38,8 @@ const MAX_Q = 12
 const WHEEL_Q_STEP = 0.05
 const MUSICAL_SLOPE_VALUES = [6, 12, 18, 24, 30, 36, 42, 48] as const
 const CUT_SLOPE_VALUES = [12, 24, 36, 48] as const
+const FFT_FADE_FLOOR_DB = 0.75
+const FFT_FADE_CEIL_DB = 6
 
 type EditableField = 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct'
 
@@ -60,6 +72,32 @@ function createPath(points: CurvePoint[], minDb: number, maxDb: number) {
     .join(' ')
 }
 
+function createSpectrumLinePath(points: SpectrumPoint[]) {
+  if (points.length === 0) {
+    return ''
+  }
+
+  return points
+    .map((point, index) => {
+      const command = index === 0 ? 'M' : 'L'
+      return `${command}${getX(point.frequencyHz)},${getSpectrumY(point.levelDb)}`
+    })
+    .join(' ')
+}
+
+function createSpectrumFillPath(points: SpectrumPoint[]) {
+  if (points.length === 0) {
+    return ''
+  }
+
+  const bottomY = VIEWBOX_HEIGHT - PADDING.bottom
+  const linePath = createSpectrumLinePath(points)
+  const lastPoint = points[points.length - 1]
+  const firstPoint = points[0]
+
+  return `${linePath} L${getX(lastPoint.frequencyHz)},${bottomY} L${getX(firstPoint.frequencyHz)},${bottomY} Z`
+}
+
 function getX(frequencyHz: number) {
   const chartWidth = VIEWBOX_WIDTH - PADDING.left - PADDING.right
   const minLog = Math.log10(MIN_FREQUENCY)
@@ -72,6 +110,21 @@ function getX(frequencyHz: number) {
 function getY(gainDb: number, minDb: number, maxDb: number) {
   const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
   return PADDING.top + ((maxDb - gainDb) / (maxDb - minDb)) * chartHeight
+}
+
+function getSpectrumY(levelDb: number) {
+  const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
+  const clampedLevel = Math.min(
+    FFT_ANALYSER_MAX_DB,
+    Math.max(FFT_ANALYSER_MIN_DB, levelDb),
+  )
+
+  return (
+    PADDING.top +
+    ((FFT_ANALYSER_MAX_DB - clampedLevel) /
+      (FFT_ANALYSER_MAX_DB - FFT_ANALYSER_MIN_DB)) *
+      chartHeight
+  )
 }
 
 function createYAxisTicks(minDb: number, maxDb: number) {
@@ -182,10 +235,23 @@ function updateBandField(
   return null
 }
 
+function getFadeOpacity(diffDb: number) {
+  if (diffDb <= FFT_FADE_FLOOR_DB) {
+    return 0
+  }
+
+  if (diffDb >= FFT_FADE_CEIL_DB) {
+    return 1
+  }
+
+  return (diffDb - FFT_FADE_FLOOR_DB) / (FFT_FADE_CEIL_DB - FFT_FADE_FLOOR_DB)
+}
+
 export function EqChart({
   baselineCurve,
   bandCurve,
   outputCurve,
+  fftOverlay,
   bands,
   selectedBandId,
   showFlatHint,
@@ -204,6 +270,7 @@ export function EqChart({
   baselineCurve: CurvePoint[]
   bandCurve: CurvePoint[]
   outputCurve: CurvePoint[]
+  fftOverlay?: FftOverlay | null
   bands: EqBand[]
   selectedBandId?: string
   showFlatHint: boolean
@@ -231,6 +298,44 @@ export function EqChart({
     () => createYAxisTicks(viewMinDb, viewMaxDb),
     [viewMaxDb, viewMinDb],
   )
+  const fftPreLinePath = useMemo(
+    () => createSpectrumLinePath(fftOverlay?.preSpectrum ?? []),
+    [fftOverlay],
+  )
+  const fftPreFillPath = useMemo(
+    () => createSpectrumFillPath(fftOverlay?.preSpectrum ?? []),
+    [fftOverlay],
+  )
+  const fftPostSegments = useMemo(() => {
+    const preSpectrum = fftOverlay?.preSpectrum ?? []
+    const postSpectrum = fftOverlay?.postSpectrum ?? []
+    const segmentCount = Math.min(preSpectrum.length, postSpectrum.length)
+
+    return Array.from({ length: Math.max(0, segmentCount - 1) }, (_, index) => {
+      const leftPre = preSpectrum[index]
+      const rightPre = preSpectrum[index + 1]
+      const leftPost = postSpectrum[index]
+      const rightPost = postSpectrum[index + 1]
+      const averageDiff =
+        (Math.abs(leftPost.levelDb - leftPre.levelDb) +
+          Math.abs(rightPost.levelDb - rightPre.levelDb)) /
+        2
+      const opacity = getFadeOpacity(averageDiff)
+
+      if (opacity <= 0) {
+        return null
+      }
+
+      return {
+        key: `${leftPost.frequencyHz}-${rightPost.frequencyHz}`,
+        x1: getX(leftPost.frequencyHz),
+        y1: getSpectrumY(leftPost.levelDb),
+        x2: getX(rightPost.frequencyHz),
+        y2: getSpectrumY(rightPost.levelDb),
+        opacity,
+      }
+    }).filter((segment): segment is NonNullable<typeof segment> => segment !== null)
+  }, [fftOverlay])
   const popupBandId = draggingBandId ?? hoveredBandId ?? pinnedBandId
   const popupBand = useMemo(
     () => bands.find((band) => band.id === popupBandId),
@@ -529,6 +634,32 @@ export function EqChart({
         <path className="curve curve-source" d={createPath(baselineCurve, viewMinDb, viewMaxDb)} />
         <path className="curve curve-eq" d={createPath(bandCurve, viewMinDb, viewMaxDb)} />
         <path className="curve curve-preview" d={createPath(outputCurve, viewMinDb, viewMaxDb)} />
+        {fftOverlay ? (
+          <g aria-hidden="true">
+            <path
+              data-testid="fft-pre-fill"
+              className="fft-overlay-fill"
+              d={fftPreFillPath}
+            />
+            <path
+              data-testid="fft-pre-line"
+              className="curve curve-fft-pre-line"
+              d={fftPreLinePath}
+            />
+            {fftPostSegments.map((segment) => (
+              <line
+                key={segment.key}
+                data-testid="fft-post-segment"
+                className="curve-fft-post-segment"
+                x1={segment.x1}
+                y1={segment.y1}
+                x2={segment.x2}
+                y2={segment.y2}
+                strokeOpacity={segment.opacity}
+              />
+            ))}
+          </g>
+        ) : null}
 
         {bands.map((band) => (
           <g key={band.id}>

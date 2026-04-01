@@ -83,7 +83,7 @@ function EditorShell() {
     }),
     [state.bands, state.sourceFileName],
   )
-  const { errorMessage: monitorErrorMessage } = useEqPlaybackMonitor({
+  const { errorMessage: monitorErrorMessage, fftOverlay } = useEqPlaybackMonitor({
     audioElement,
     bands: state.bands,
     baselineCurve: state.baselineCurve,
@@ -511,6 +511,12 @@ function EditorShell() {
               <span className="legend-item legend-source">Baseline</span>
               <span className="legend-item legend-eq">Param EQ</span>
               <span className="legend-item legend-preview">Output</span>
+              {fftOverlay ? (
+                <>
+                  <span className="legend-item legend-fft-pre">Pre-Gain / Pre-EQ</span>
+                  <span className="legend-item legend-fft-post">Post FFT Diff</span>
+                </>
+              ) : null}
             </div>
           </div>
 
@@ -518,6 +524,7 @@ function EditorShell() {
             baselineCurve={state.baselineCurve}
             bandCurve={bandCurve}
             outputCurve={outputCurve}
+            fftOverlay={fftOverlay}
             bands={state.bands}
             selectedBandId={state.selectedBandId}
             showFlatHint={!state.sourceFileName}

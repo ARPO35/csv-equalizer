@@ -21,6 +21,8 @@
   --curve-source: #8dd3ff;
   --curve-eq: #ff9554;
   --curve-preview: #d2ff72;
+  --curve-fft-pre: #ffffff;
+  --curve-fft-post: #ffd34d;
 }
 
 * {
