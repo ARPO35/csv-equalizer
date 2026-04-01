@@ -11,6 +11,7 @@ import './App.css'
 import { EqChart } from './components/EqChart'
 import { useEqPlaybackMonitor } from './lib/audio-monitor'
 import { describeBand, sortBandsByFrequency } from './lib/bands'
+import { createLogFrequencyGrid, resampleCurve } from './lib/curve'
 import { parseCurveCsv } from './lib/csv'
 import { computeEqCurve, sumCurveWithEq } from './lib/eq'
 import { computeAutoPreGainDb } from './lib/pre-gain'
@@ -41,24 +42,32 @@ function EditorShell() {
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const [isEditingPreGain, setIsEditingPreGain] = useState(false)
   const [preGainDraft, setPreGainDraft] = useState('')
+  const [isEditingVisualGain, setIsEditingVisualGain] = useState(false)
+  const [visualGainDraft, setVisualGainDraft] = useState('')
+  const [isEditingGridPoints, setIsEditingGridPoints] = useState(false)
+  const [gridPointDraft, setGridPointDraft] = useState('')
 
   const activeBands = useMemo(
     () => state.bands.filter((band) => !band.isBypassed),
     [state.bands],
   )
+  const workingFrequencies = useMemo(
+    () => createLogFrequencyGrid(state.gridPointCount),
+    [state.gridPointCount],
+  )
+  const workingBaselineCurve = useMemo(
+    () => resampleCurve(state.baselineCurve, workingFrequencies),
+    [state.baselineCurve, workingFrequencies],
+  )
 
   const bandCurve = useMemo(
-    () =>
-      computeEqCurve(
-        activeBands,
-        state.baselineCurve.map((point) => point.frequencyHz),
-      ),
-    [activeBands, state.baselineCurve],
+    () => computeEqCurve(activeBands, workingFrequencies),
+    [activeBands, workingFrequencies],
   )
 
   const outputCurve = useMemo(
-    () => sumCurveWithEq(state.baselineCurve, bandCurve),
-    [bandCurve, state.baselineCurve],
+    () => sumCurveWithEq(workingBaselineCurve, bandCurve),
+    [bandCurve, workingBaselineCurve],
   )
 
   const rawOutputPeakDb = useMemo(
@@ -122,6 +131,37 @@ function EditorShell() {
 
     setIsEditingPreGain(true)
     setPreGainDraft(state.manualPreGainDb.toFixed(1))
+  }
+
+  function commitVisualGain() {
+    const nextValue = Number(visualGainDraft)
+    if (!Number.isNaN(nextValue)) {
+      dispatch({ type: 'set-visual-gain-db', payload: nextValue })
+    }
+    setIsEditingVisualGain(false)
+    setVisualGainDraft('')
+  }
+
+  function startVisualGainEdit() {
+    setIsEditingVisualGain(true)
+    setVisualGainDraft(state.visualGainDb.toFixed(1))
+  }
+
+  function commitGridPoints() {
+    const nextValue = Math.round(Number(gridPointDraft))
+    if (!Number.isNaN(nextValue)) {
+      dispatch({
+        type: 'set-grid-point-count',
+        payload: Math.min(8192, Math.max(16, nextValue)),
+      })
+    }
+    setIsEditingGridPoints(false)
+    setGridPointDraft('')
+  }
+
+  function startGridPointsEdit() {
+    setIsEditingGridPoints(true)
+    setGridPointDraft(state.gridPointCount.toString())
   }
 
   const handleDeleteSelectedBand = useEffectEvent((event: KeyboardEvent) => {
@@ -411,11 +451,76 @@ function EditorShell() {
               </article>
               <article>
                 <span>Grid points</span>
-                <strong>{state.baselineCurve.length}</strong>
+                <div className="metric-inline-row">
+                  {isEditingGridPoints ? (
+                    <input
+                      aria-label="Grid points"
+                      className="metric-inline-input"
+                      type="number"
+                      autoFocus
+                      step={1}
+                      value={gridPointDraft}
+                      onChange={(event) => setGridPointDraft(event.target.value)}
+                      onBlur={commitGridPoints}
+                      onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                        if (event.key === 'Enter') {
+                          commitGridPoints()
+                        }
+                        if (event.key === 'Escape') {
+                          setIsEditingGridPoints(false)
+                          setGridPointDraft('')
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label="Edit grid points"
+                      className="metric-inline-value"
+                      onDoubleClick={startGridPointsEdit}
+                    >
+                      {state.gridPointCount}
+                    </button>
+                  )}
+                </div>
               </article>
               <article>
                 <span>Bands</span>
                 <strong>{activeBands.length} / {state.bands.length}</strong>
+              </article>
+              <article>
+                <span>Visual Gain</span>
+                <div className="metric-inline-row">
+                  {isEditingVisualGain ? (
+                    <input
+                      aria-label="Visual gain"
+                      className="metric-inline-input"
+                      type="number"
+                      autoFocus
+                      step={0.1}
+                      value={visualGainDraft}
+                      onChange={(event) => setVisualGainDraft(event.target.value)}
+                      onBlur={commitVisualGain}
+                      onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                        if (event.key === 'Enter') {
+                          commitVisualGain()
+                        }
+                        if (event.key === 'Escape') {
+                          setIsEditingVisualGain(false)
+                          setVisualGainDraft('')
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="metric-inline-value"
+                      onDoubleClick={startVisualGainEdit}
+                    >
+                      {formatDb(state.visualGainDb)}
+                    </button>
+                  )}
+                </div>
               </article>
               <article className="pre-gain-card">
                 <span>Pre-Gain</span>
@@ -521,10 +626,11 @@ function EditorShell() {
           </div>
 
           <EqChart
-            baselineCurve={state.baselineCurve}
+            baselineCurve={workingBaselineCurve}
             bandCurve={bandCurve}
             outputCurve={outputCurve}
             fftOverlay={fftOverlay}
+            visualGainDb={state.visualGainDb}
             bands={state.bands}
             selectedBandId={state.selectedBandId}
             showFlatHint={!state.sourceFileName}

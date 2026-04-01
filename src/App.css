@@ -114,6 +114,47 @@
   color: var(--text);
 }
 
+.metric-inline-row {
+  display: flex;
+  align-items: center;
+  min-height: 1.25rem;
+}
+
+.metric-inline-value,
+.metric-inline-input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 0.96rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.metric-inline-value {
+  cursor: default;
+}
+
+.metric-inline-input {
+  width: 6.5rem;
+  outline: none;
+  box-shadow: none;
+}
+
+.metric-inline-input::-webkit-outer-spin-button,
+.metric-inline-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.metric-inline-input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .pre-gain-card {
   grid-column: span 2;
 }

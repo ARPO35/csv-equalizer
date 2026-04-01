@@ -59,8 +59,10 @@ export type EqEditorState = {
   monitorBaselineEnabled: boolean
   viewMaxDb: number
   viewMinDb: number
+  gridPointCount: number
   preGainMode: 'auto' | 'manual'
   manualPreGainDb: number
+  visualGainDb: number
   audioFileName?: string
   errorMessage?: string
 }

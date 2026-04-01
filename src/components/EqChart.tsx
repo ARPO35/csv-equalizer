@@ -9,10 +9,6 @@ import {
   useRef,
   useState,
 } from 'react'
-import {
-  FFT_ANALYSER_MAX_DB,
-  FFT_ANALYSER_MIN_DB,
-} from '../lib/audio-monitor'
 import { convertBandType, createDefaultBand, describeBand } from '../lib/bands'
 import type {
   CurvePoint,
@@ -40,8 +36,16 @@ const MUSICAL_SLOPE_VALUES = [6, 12, 18, 24, 30, 36, 42, 48] as const
 const CUT_SLOPE_VALUES = [12, 24, 36, 48] as const
 const FFT_FADE_FLOOR_DB = 0.75
 const FFT_FADE_CEIL_DB = 6
+const FFT_DISPLAY_REFERENCE_FREQUENCY = 1_000
+const FFT_DISPLAY_SLOPE_COMPENSATION_DB_PER_OCT = 3
+const FFT_DISPLAY_GAMMA = 0.35
+const SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT = 2
 
 type EditableField = 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct'
+
+function clampValue(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
 
 function formatFrequencyLabel(value: number) {
   return value >= 1_000 ? `${value / 1_000}k` : `${value}`
@@ -72,7 +76,72 @@ function createPath(points: CurvePoint[], minDb: number, maxDb: number) {
     .join(' ')
 }
 
-function createSpectrumLinePath(points: SpectrumPoint[]) {
+function interpolateCatmullRom(
+  previousValue: number,
+  startValue: number,
+  endValue: number,
+  nextValue: number,
+  t: number,
+) {
+  const tSquared = t * t
+  const tCubed = tSquared * t
+
+  return (
+    0.5 *
+    ((2 * startValue) +
+      (-previousValue + endValue) * t +
+      (2 * previousValue - 5 * startValue + 4 * endValue - nextValue) *
+        tSquared +
+      (-previousValue + 3 * startValue - 3 * endValue + nextValue) * tCubed)
+  )
+}
+
+function createSmoothedSpectrumPoints(points: SpectrumPoint[]) {
+  if (points.length <= 1) {
+    return points
+  }
+
+  const smoothedPoints: SpectrumPoint[] = [points[0]]
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previousPoint = points[Math.max(0, index - 1)]
+    const startPoint = points[index]
+    const endPoint = points[index + 1]
+    const nextPoint = points[Math.min(points.length - 1, index + 2)]
+
+    for (
+      let step = 1;
+      step <= SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT;
+      step += 1
+    ) {
+      const t = step / SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT
+      smoothedPoints.push({
+        frequencyHz: clampValue(
+          interpolateCatmullRom(
+            previousPoint.frequencyHz,
+            startPoint.frequencyHz,
+            endPoint.frequencyHz,
+            nextPoint.frequencyHz,
+            t,
+          ),
+          startPoint.frequencyHz,
+          endPoint.frequencyHz,
+        ),
+        levelDb: interpolateCatmullRom(
+          previousPoint.levelDb,
+          startPoint.levelDb,
+          endPoint.levelDb,
+          nextPoint.levelDb,
+          t,
+        ),
+      })
+    }
+  }
+
+  return smoothedPoints
+}
+
+function createSpectrumLinePath(points: SpectrumPoint[], visualGainDb: number) {
   if (points.length === 0) {
     return ''
   }
@@ -80,18 +149,18 @@ function createSpectrumLinePath(points: SpectrumPoint[]) {
   return points
     .map((point, index) => {
       const command = index === 0 ? 'M' : 'L'
-      return `${command}${getX(point.frequencyHz)},${getSpectrumY(point.levelDb)}`
+      return `${command}${getX(point.frequencyHz)},${getSpectrumY(point.levelDb, point.frequencyHz, visualGainDb)}`
     })
     .join(' ')
 }
 
-function createSpectrumFillPath(points: SpectrumPoint[]) {
+function createSpectrumFillPath(points: SpectrumPoint[], visualGainDb: number) {
   if (points.length === 0) {
     return ''
   }
 
   const bottomY = VIEWBOX_HEIGHT - PADDING.bottom
-  const linePath = createSpectrumLinePath(points)
+  const linePath = createSpectrumLinePath(points, visualGainDb)
   const lastPoint = points[points.length - 1]
   const firstPoint = points[0]
 
@@ -112,19 +181,70 @@ function getY(gainDb: number, minDb: number, maxDb: number) {
   return PADDING.top + ((maxDb - gainDb) / (maxDb - minDb)) * chartHeight
 }
 
-function getSpectrumY(levelDb: number) {
-  const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
-  const clampedLevel = Math.min(
-    FFT_ANALYSER_MAX_DB,
-    Math.max(FFT_ANALYSER_MIN_DB, levelDb),
-  )
-
+export function getSpectrumDisplayLevelDb(
+  levelDb: number,
+  frequencyHz: number,
+  visualGainDb = 0,
+) {
   return (
-    PADDING.top +
-    ((FFT_ANALYSER_MAX_DB - clampedLevel) /
-      (FFT_ANALYSER_MAX_DB - FFT_ANALYSER_MIN_DB)) *
-      chartHeight
+    levelDb +
+    Math.log2(
+      clampValue(frequencyHz, MIN_FREQUENCY, MAX_FREQUENCY) /
+        FFT_DISPLAY_REFERENCE_FREQUENCY,
+    ) *
+      FFT_DISPLAY_SLOPE_COMPENSATION_DB_PER_OCT +
+    visualGainDb
   )
+}
+
+export function getSpectrumY(
+  levelDb: number,
+  frequencyHz: number,
+  visualGainDb = 0,
+) {
+  const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
+  const compensatedLevelDb = getSpectrumDisplayLevelDb(
+    levelDb,
+    frequencyHz,
+    visualGainDb,
+  )
+  const magnitude = clampValue(10 ** (compensatedLevelDb / 20), 0, 1)
+  const shapedMagnitude = magnitude ** FFT_DISPLAY_GAMMA
+
+  return PADDING.top + (1 - shapedMagnitude) * chartHeight
+}
+
+function createSpectrumSegments(
+  preSpectrum: SpectrumPoint[],
+  postSpectrum: SpectrumPoint[],
+  visualGainDb: number,
+) {
+  const segmentCount = Math.min(preSpectrum.length, postSpectrum.length)
+
+  return Array.from({ length: Math.max(0, segmentCount - 1) }, (_, index) => {
+    const leftPre = preSpectrum[index]
+    const rightPre = preSpectrum[index + 1]
+    const leftPost = postSpectrum[index]
+    const rightPost = postSpectrum[index + 1]
+    const averageDiff =
+      (Math.abs(leftPost.levelDb - leftPre.levelDb) +
+        Math.abs(rightPost.levelDb - rightPre.levelDb)) /
+      2
+    const opacity = getFadeOpacity(averageDiff)
+
+    if (opacity <= 0) {
+      return null
+    }
+
+    return {
+      id: `${leftPost.frequencyHz}-${rightPost.frequencyHz}`,
+      x1: getX(leftPost.frequencyHz),
+      y1: getSpectrumY(leftPost.levelDb, leftPost.frequencyHz, visualGainDb),
+      x2: getX(rightPost.frequencyHz),
+      y2: getSpectrumY(rightPost.levelDb, rightPost.frequencyHz, visualGainDb),
+      opacity,
+    }
+  }).filter((segment): segment is NonNullable<typeof segment> => segment !== null)
 }
 
 function createYAxisTicks(minDb: number, maxDb: number) {
@@ -252,6 +372,7 @@ export function EqChart({
   bandCurve,
   outputCurve,
   fftOverlay,
+  visualGainDb,
   bands,
   selectedBandId,
   showFlatHint,
@@ -271,6 +392,7 @@ export function EqChart({
   bandCurve: CurvePoint[]
   outputCurve: CurvePoint[]
   fftOverlay?: FftOverlay | null
+  visualGainDb: number
   bands: EqBand[]
   selectedBandId?: string
   showFlatHint: boolean
@@ -298,44 +420,31 @@ export function EqChart({
     () => createYAxisTicks(viewMinDb, viewMaxDb),
     [viewMaxDb, viewMinDb],
   )
-  const fftPreLinePath = useMemo(
-    () => createSpectrumLinePath(fftOverlay?.preSpectrum ?? []),
+  const smoothedPreSpectrum = useMemo(
+    () => createSmoothedSpectrumPoints(fftOverlay?.preSpectrum ?? []),
     [fftOverlay],
+  )
+  const smoothedPostSpectrum = useMemo(
+    () => createSmoothedSpectrumPoints(fftOverlay?.postSpectrum ?? []),
+    [fftOverlay],
+  )
+  const fftPreLinePath = useMemo(
+    () => createSpectrumLinePath(smoothedPreSpectrum, visualGainDb),
+    [smoothedPreSpectrum, visualGainDb],
   )
   const fftPreFillPath = useMemo(
-    () => createSpectrumFillPath(fftOverlay?.preSpectrum ?? []),
-    [fftOverlay],
+    () => createSpectrumFillPath(smoothedPreSpectrum, visualGainDb),
+    [smoothedPreSpectrum, visualGainDb],
   )
-  const fftPostSegments = useMemo(() => {
-    const preSpectrum = fftOverlay?.preSpectrum ?? []
-    const postSpectrum = fftOverlay?.postSpectrum ?? []
-    const segmentCount = Math.min(preSpectrum.length, postSpectrum.length)
-
-    return Array.from({ length: Math.max(0, segmentCount - 1) }, (_, index) => {
-      const leftPre = preSpectrum[index]
-      const rightPre = preSpectrum[index + 1]
-      const leftPost = postSpectrum[index]
-      const rightPost = postSpectrum[index + 1]
-      const averageDiff =
-        (Math.abs(leftPost.levelDb - leftPre.levelDb) +
-          Math.abs(rightPost.levelDb - rightPre.levelDb)) /
-        2
-      const opacity = getFadeOpacity(averageDiff)
-
-      if (opacity <= 0) {
-        return null
-      }
-
-      return {
-        key: `${leftPost.frequencyHz}-${rightPost.frequencyHz}`,
-        x1: getX(leftPost.frequencyHz),
-        y1: getSpectrumY(leftPost.levelDb),
-        x2: getX(rightPost.frequencyHz),
-        y2: getSpectrumY(rightPost.levelDb),
-        opacity,
-      }
-    }).filter((segment): segment is NonNullable<typeof segment> => segment !== null)
-  }, [fftOverlay])
+  const fftPostSegments = useMemo(
+    () =>
+      createSpectrumSegments(
+        smoothedPreSpectrum,
+        smoothedPostSpectrum,
+        visualGainDb,
+      ),
+    [smoothedPostSpectrum, smoothedPreSpectrum, visualGainDb],
+  )
   const popupBandId = draggingBandId ?? hoveredBandId ?? pinnedBandId
   const popupBand = useMemo(
     () => bands.find((band) => band.id === popupBandId),
@@ -648,7 +757,7 @@ export function EqChart({
             />
             {fftPostSegments.map((segment) => (
               <line
-                key={segment.key}
+                key={segment.id}
                 data-testid="fft-post-segment"
                 className="curve-fft-post-segment"
                 x1={segment.x1}

@@ -15,8 +15,6 @@ export const FFT_ANALYSER_MAX_DB = 0
 const FFT_ANALYSER_SIZE = 8192
 const FFT_ANALYSER_SMOOTHING = 0.82
 const FFT_OVERLAY_GRID_SIZE = 1024
-const FFT_SMOOTHING_FRACTION = 24
-const FFT_SMOOTHING_MIN_BIN_COUNT = 2
 const GRAPH_EQ_CENTERS = [
   20,
   25,
@@ -101,14 +99,6 @@ function getFftBinWidthHz(nyquistHz: number, binCount: number) {
   return nyquistHz / Math.max(1, binCount)
 }
 
-function getBandBounds(frequencyHz: number, fraction = FFT_SMOOTHING_FRACTION) {
-  const ratio = 2 ** (1 / (fraction * 2))
-  return {
-    lowerHz: frequencyHz / ratio,
-    upperHz: frequencyHz * ratio,
-  }
-}
-
 function interpolateFrequencyLevelDb(
   frequencyData: Float32Array,
   nyquistHz: number,
@@ -137,29 +127,6 @@ function interpolateFrequencyLevelDb(
   return leftValue + (rightValue - leftValue) * blend
 }
 
-function countBinsInBand(
-  frequencyData: Float32Array,
-  nyquistHz: number,
-  lowerHz: number,
-  upperHz: number,
-) {
-  if (frequencyData.length === 0 || upperHz <= lowerHz) {
-    return 0
-  }
-
-  const binWidthHz = getFftBinWidthHz(nyquistHz, frequencyData.length)
-  let count = 0
-
-  for (let index = 0; index < frequencyData.length; index += 1) {
-    const binFrequencyHz = index * binWidthHz
-    if (binFrequencyHz >= lowerHz && binFrequencyHz <= upperHz) {
-      count += 1
-    }
-  }
-
-  return count
-}
-
 function createRawSpectrumTrace(
   frequencyData: Float32Array,
   nyquistHz: number,
@@ -175,46 +142,6 @@ function createRawSpectrumTrace(
       floorDb,
     ),
   }))
-}
-
-function smoothSpectrumTrace(
-  rawSpectrum: SpectrumPoint[],
-  frequencyData: Float32Array,
-  nyquistHz: number,
-) {
-  return rawSpectrum.map((point, index) => {
-    const { lowerHz, upperHz } = getBandBounds(point.frequencyHz)
-    const binCount = countBinsInBand(
-      frequencyData,
-      nyquistHz,
-      lowerHz,
-      upperHz,
-    )
-
-    if (binCount < FFT_SMOOTHING_MIN_BIN_COUNT) {
-      return rawSpectrum[index]
-    }
-
-    let maxLevelDb = rawSpectrum[index].levelDb
-    let matchedPointCount = 0
-
-    for (let candidateIndex = 0; candidateIndex < rawSpectrum.length; candidateIndex += 1) {
-      const candidate = rawSpectrum[candidateIndex]
-      if (candidate.frequencyHz < lowerHz || candidate.frequencyHz > upperHz) {
-        continue
-      }
-
-      matchedPointCount += 1
-      if (candidate.levelDb > maxLevelDb) {
-        maxLevelDb = candidate.levelDb
-      }
-    }
-
-    return {
-      frequencyHz: point.frequencyHz,
-      levelDb: matchedPointCount === 0 ? point.levelDb : maxLevelDb,
-    }
-  })
 }
 
 function sampleCurveGain(curve: CurvePoint[], frequencyHz: number) {
@@ -403,14 +330,12 @@ export function mapFrequencyDataToSpectrum(
     }))
   }
 
-  const rawSpectrum = createRawSpectrumTrace(
+  return createRawSpectrumTrace(
     frequencyData,
     nyquistHz,
     frequencies,
     floorDb,
   )
-
-  return smoothSpectrumTrace(rawSpectrum, frequencyData, nyquistHz)
 }
 
 function ensureSpectrumBuffers(

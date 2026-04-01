@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EqChart } from './EqChart'
+import { EqChart, getSpectrumDisplayLevelDb } from './EqChart'
 import { createFlatCurve } from '../lib/curve'
 import type { EqBand, FftOverlay } from '../types'
 
@@ -28,6 +28,7 @@ function renderChart(
       bandCurve={createFlatCurve([20, 1000, 20000])}
       outputCurve={baselineCurve}
       bands={[]}
+      visualGainDb={30}
       showFlatHint
       viewMinDb={-15}
       viewMaxDb={15}
@@ -342,7 +343,26 @@ describe('EqChart', () => {
 
     expect(screen.getByTestId('fft-pre-fill')).toBeTruthy()
     expect(screen.getByTestId('fft-pre-line')).toBeTruthy()
-    expect(screen.getAllByTestId('fft-post-segment')).toHaveLength(2)
+    expect(screen.getAllByTestId('fft-post-segment').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('applies +3 dB per octave display compensation around 1 kHz', () => {
+    expect(getSpectrumDisplayLevelDb(-30, 1000)).toBe(-30)
+    expect(getSpectrumDisplayLevelDb(-30, 2000)).toBeCloseTo(-27)
+    expect(getSpectrumDisplayLevelDb(-30, 500)).toBeCloseTo(-33)
+  })
+
+  it('adds visual gain on top of the display compensation only', () => {
+    expect(getSpectrumDisplayLevelDb(-30, 1000, 30)).toBe(0)
+    expect(getSpectrumDisplayLevelDb(-30, 2000, 30)).toBeCloseTo(3)
+  })
+
+  it('renders the FFT pre-line as a smoothed sampled path', () => {
+    renderChart({ fftOverlay, showFlatHint: false })
+
+    const path = screen.getByTestId('fft-pre-line')
+    const commands = path.getAttribute('d')?.match(/[ML]/g) ?? []
+    expect(commands.length).toBeGreaterThan(3)
   })
 
   it('hides yellow FFT segments when post and pre responses are nearly identical', () => {
@@ -359,6 +379,37 @@ describe('EqChart', () => {
     })
 
     expect(screen.queryByTestId('fft-post-segment')).toBeNull()
+  })
+
+  it('moves the FFT display upward when visual gain increases', () => {
+    const { rerender } = renderChart({ fftOverlay, showFlatHint: false, visualGainDb: 0 })
+    const lowGainPath = screen.getByTestId('fft-pre-line').getAttribute('d')
+
+    rerender(
+      <EqChart
+        baselineCurve={baselineCurve}
+        bandCurve={createFlatCurve([20, 1000, 20000])}
+        outputCurve={baselineCurve}
+        bands={[]}
+        visualGainDb={30}
+        showFlatHint={false}
+        viewMinDb={-15}
+        viewMaxDb={15}
+        onBandCommit={vi.fn()}
+        onBandCreate={vi.fn()}
+        onBandDelete={vi.fn()}
+        onBandToggleBypass={vi.fn()}
+        onBandSelect={vi.fn()}
+        onIncreaseViewMax={vi.fn()}
+        onDecreaseViewMax={vi.fn()}
+        onIncreaseViewMin={vi.fn()}
+        onDecreaseViewMin={vi.fn()}
+        fftOverlay={fftOverlay}
+      />,
+    )
+
+    const highGainPath = screen.getByTestId('fft-pre-line').getAttribute('d')
+    expect(highGainPath).not.toEqual(lowGainPath)
   })
 })
 

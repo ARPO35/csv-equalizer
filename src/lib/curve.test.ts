@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createFlatCurve, createLogFrequencyGrid, sumCurves } from './curve'
+import {
+  createFlatCurve,
+  createLogFrequencyGrid,
+  resampleCurve,
+  sumCurves,
+} from './curve'
 
 describe('curve helpers', () => {
   it('creates a fixed 512-point logarithmic grid by default', () => {
@@ -22,5 +27,22 @@ describe('curve helpers', () => {
       { frequencyHz: 1000, gainDb: 2 },
       { frequencyHz: 20000, gainDb: 0.5 },
     ])
+  })
+
+  it('resamples a curve onto a target logarithmic grid', () => {
+    const resampled = resampleCurve(
+      [
+        { frequencyHz: 20, gainDb: -3 },
+        { frequencyHz: 1000, gainDb: 3 },
+        { frequencyHz: 20000, gainDb: 0 },
+      ],
+      [20, 200, 1000, 20000],
+    )
+
+    expect(resampled[0]).toEqual({ frequencyHz: 20, gainDb: -3 })
+    expect(resampled[1].frequencyHz).toBe(200)
+    expect(resampled[1].gainDb).toBeCloseTo(0.531551, 6)
+    expect(resampled[2]).toEqual({ frequencyHz: 1000, gainDb: 3 })
+    expect(resampled[3]).toEqual({ frequencyHz: 20000, gainDb: 0 })
   })
 })

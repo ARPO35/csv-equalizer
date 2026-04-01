@@ -215,34 +215,31 @@ describe('audio monitor graph', () => {
     expect(getConnections(graph.wetGain)).toEqual([])
   })
 
-  it('keeps low-frequency points unsmoothed when fewer than two FFT bins fall in-band', () => {
-    const frequencyData = Float32Array.from([-18, -90, -90, -90])
+  it('interpolates analyser bins onto the log-spaced overlay grid without band averaging', () => {
+    const frequencyData = Float32Array.from([-90, -30, -24])
     const spectrum = mapFrequencyDataToSpectrum(
       frequencyData,
       24_000,
-      [40],
+      [8_000, 12_000, 16_000],
       FFT_ANALYSER_MIN_DB,
     )
 
-    expect(spectrum[0].frequencyHz).toBe(40)
-    expect(spectrum[0].levelDb).toBeCloseTo(-18.48, 1)
+    expect(spectrum[0]).toEqual({ frequencyHz: 8_000, levelDb: -30 })
+    expect(spectrum[1]).toEqual({ frequencyHz: 12_000, levelDb: -27 })
+    expect(spectrum[2]).toEqual({ frequencyHz: 16_000, levelDb: -24 })
   })
 
-  it('applies overlapping max smoothing on the dense log trace to preserve narrow peaks', () => {
-    const frequencyData = new Float32Array(200).fill(-90)
-    frequencyData[99] = -18
-    frequencyData[100] = -30
-    frequencyData[101] = -24
+  it('preserves narrow peaks instead of merging neighboring bins', () => {
+    const frequencyData = Float32Array.from([-90, -18, -90, -90])
 
     const spectrum = mapFrequencyDataToSpectrum(
       frequencyData,
       24_000,
-      [11_880, 12_000, 12_120],
+      [6_000, 12_000],
       FFT_ANALYSER_MIN_DB,
     )
 
-    expect(spectrum[0]).toEqual({ frequencyHz: 11_880, levelDb: -18 })
-    expect(spectrum[1]).toEqual({ frequencyHz: 12_000, levelDb: -18 })
-    expect(spectrum[2]).toEqual({ frequencyHz: 12_120, levelDb: -24 })
+    expect(spectrum[0]).toEqual({ frequencyHz: 6_000, levelDb: -18 })
+    expect(spectrum[1]).toEqual({ frequencyHz: 12_000, levelDb: -90 })
   })
 })
