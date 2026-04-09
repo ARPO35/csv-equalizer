@@ -187,6 +187,61 @@ describe('EqChart', () => {
     expect(onBandCommit).not.toHaveBeenCalled()
   })
 
+  it('coalesces drag commits to one update per animation frame', () => {
+    let queuedFrame: FrameRequestCallback | null = null
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      queuedFrame = callback
+      return 1
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+
+    fireEvent.pointerMove(node, {
+      pointerId: 1,
+      clientX: 620,
+      clientY: 320,
+    })
+    fireEvent.pointerMove(node, {
+      pointerId: 1,
+      clientX: 650,
+      clientY: 300,
+    })
+
+    expect(onBandCommit).not.toHaveBeenCalled()
+
+    act(() => {
+      queuedFrame?.(16)
+    })
+
+    expect(onBandCommit).toHaveBeenCalledTimes(1)
+  })
+
   it('adjusts shelf slope with the mouse wheel while dragging', () => {
     const onBandCommit = vi.fn()
     const band: EqBand = {

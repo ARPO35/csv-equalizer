@@ -15,6 +15,12 @@ export const FFT_ANALYSER_MAX_DB = 0
 const FFT_ANALYSER_SIZE = 8192
 const FFT_ANALYSER_SMOOTHING = 0.82
 const FFT_OVERLAY_GRID_SIZE = 1024
+const FFT_OVERLAY_SAMPLE_INTERVAL_MS = 1000 / 30
+export const MONITOR_UPDATE_INTERVAL_MS = 150
+export const AUDIO_PARAM_RAMP_MS = 40
+export const GRAPH_CROSSFADE_MS = 60
+const AUDIO_PARAM_RAMP_SECONDS = AUDIO_PARAM_RAMP_MS / 1000
+const GRAPH_CROSSFADE_SECONDS = GRAPH_CROSSFADE_MS / 1000
 const GRAPH_EQ_CENTERS = [
   20,
   25,
@@ -51,6 +57,29 @@ const GRAPH_EQ_CENTERS = [
 const FFT_OVERLAY_FREQUENCIES = createLogFrequencyGrid(FFT_OVERLAY_GRID_SIZE)
 
 type AudioContextConstructor = new () => AudioContext
+type MonitorBranchKey = 'a' | 'b'
+
+type SchedulableAudioParam = {
+  value: number
+  cancelScheduledValues?: (time: number) => void
+  setValueAtTime?: (value: number, time: number) => void
+  linearRampToValueAtTime?: (value: number, time: number) => void
+}
+
+type BandStageGroup = {
+  bandId: string
+  type: EqBand['type']
+  nodes: BiquadFilterNode[]
+}
+
+type MonitorBranch = {
+  entry: GainNode
+  output: GainNode
+  baselineNodes: BiquadFilterNode[]
+  paramStages: BandStageGroup[]
+  filterNodes: BiquadFilterNode[]
+  structureKey: string | null
+}
 
 type MonitorGraph = {
   source: MediaElementAudioSourceNode
@@ -60,7 +89,19 @@ type MonitorGraph = {
   wetGain: GainNode
   preAnalyser: AnalyserNode
   postAnalyser: AnalyserNode
+  branchA: MonitorBranch
+  branchB: MonitorBranch
+  activeBranchKey: MonitorBranchKey
   filterNodes: BiquadFilterNode[]
+  cleanupTimerId: ReturnType<typeof globalThis.setTimeout> | null
+}
+
+type MonitorStateSnapshot = {
+  bands: EqBand[]
+  baselineCurve: CurvePoint[]
+  monitorBypassed: boolean
+  monitorBaselineEnabled: boolean
+  preGainDb: number
 }
 
 type SpectrumBuffers = {
@@ -173,11 +214,20 @@ function sampleCurveGain(curve: CurvePoint[], frequencyHz: number) {
   return 0
 }
 
+function getMonitorActiveBands(bands: EqBand[]) {
+  return bands.filter((band) => !band.isBypassed)
+}
+
+function getStageCount(band: EqBand) {
+  if (band.type === 'lowCut' || band.type === 'highCut') {
+    return band.slopeDbPerOct / 12
+  }
+
+  return band.slopeDbPerOct / 6
+}
+
 function createFilterNodesForBand(context: AudioContext, band: EqBand) {
-  const stageCount =
-    band.type === 'lowCut' || band.type === 'highCut'
-      ? band.slopeDbPerOct / 12
-      : band.slopeDbPerOct / 6
+  const stageCount = getStageCount(band)
   const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
 
   return Array.from({ length: stageCount }, () => {
@@ -201,6 +251,278 @@ function createFilterNodesForBand(context: AudioContext, band: EqBand) {
     filter.Q.value = CUT_Q
     return filter
   })
+}
+
+function createMonitorBranch(context: AudioContext): MonitorBranch {
+  const entry = context.createGain()
+  const output = context.createGain()
+  output.gain.value = 0
+
+  return {
+    entry,
+    output,
+    baselineNodes: [],
+    paramStages: [],
+    filterNodes: [],
+    structureKey: null,
+  }
+}
+
+function getActiveBranch(graph: MonitorGraph) {
+  return graph.activeBranchKey === 'a' ? graph.branchA : graph.branchB
+}
+
+function getInactiveBranch(graph: MonitorGraph) {
+  return graph.activeBranchKey === 'a' ? graph.branchB : graph.branchA
+}
+
+function clearBranchCleanup(graph: MonitorGraph) {
+  if (graph.cleanupTimerId !== null) {
+    globalThis.clearTimeout(graph.cleanupTimerId)
+    graph.cleanupTimerId = null
+  }
+}
+
+function resetMonitorBranch(branch: MonitorBranch) {
+  safeDisconnect(branch.entry)
+  branch.filterNodes.forEach((node) => safeDisconnect(node))
+  branch.baselineNodes = []
+  branch.paramStages = []
+  branch.filterNodes = []
+  branch.structureKey = null
+}
+
+function connectMonitorBranch(branch: MonitorBranch) {
+  safeDisconnect(branch.entry)
+  branch.filterNodes.forEach((node) => safeDisconnect(node))
+
+  if (branch.filterNodes.length === 0) {
+    branch.entry.connect(branch.output)
+    return
+  }
+
+  branch.entry.connect(branch.filterNodes[0])
+
+  branch.filterNodes.forEach((node, index) => {
+    const nextNode = branch.filterNodes[index + 1] ?? branch.output
+    node.connect(nextNode)
+  })
+}
+
+function getMonitorStructureKey(state: MonitorStateSnapshot) {
+  if (state.monitorBypassed) {
+    return 'bypassed'
+  }
+
+  const bandKey = getMonitorActiveBands(state.bands)
+    .map((band) => `${band.id}:${band.type}:${band.slopeDbPerOct}`)
+    .join('|')
+
+  return `${state.monitorBaselineEnabled ? 'baseline' : 'flat'}::${bandKey}`
+}
+
+function scheduleAudioParamValue(
+  context: AudioContext,
+  param: SchedulableAudioParam,
+  nextValue: number,
+  rampSeconds: number,
+) {
+  const now = 'currentTime' in context ? context.currentTime : 0
+
+  if (rampSeconds <= 0) {
+    if (typeof param.cancelScheduledValues === 'function') {
+      param.cancelScheduledValues(now)
+    }
+
+    if (typeof param.setValueAtTime === 'function') {
+      param.setValueAtTime(nextValue, now)
+      return
+    }
+
+    param.value = nextValue
+    return
+  }
+
+  if (
+    typeof param.cancelScheduledValues === 'function' &&
+    typeof param.setValueAtTime === 'function' &&
+    typeof param.linearRampToValueAtTime === 'function'
+  ) {
+    param.cancelScheduledValues(now)
+    param.setValueAtTime(param.value, now)
+    param.linearRampToValueAtTime(nextValue, now + rampSeconds)
+    return
+  }
+
+  if (typeof param.setValueAtTime === 'function') {
+    param.setValueAtTime(nextValue, now)
+    return
+  }
+
+  param.value = nextValue
+}
+
+function setAudioParamValue(
+  context: AudioContext,
+  param: SchedulableAudioParam,
+  nextValue: number,
+) {
+  scheduleAudioParamValue(context, param, nextValue, 0)
+}
+
+function buildBranchForState(
+  context: AudioContext,
+  branch: MonitorBranch,
+  state: MonitorStateSnapshot,
+) {
+  resetMonitorBranch(branch)
+
+  if (state.monitorBypassed) {
+    branch.structureKey = getMonitorStructureKey(state)
+    connectMonitorBranch(branch)
+    return
+  }
+
+  branch.baselineNodes = state.monitorBaselineEnabled
+    ? createGraphEqNodes(context, state.baselineCurve)
+    : []
+  branch.paramStages = getMonitorActiveBands(state.bands).map((band) => ({
+    bandId: band.id,
+    type: band.type,
+    nodes: createFilterNodesForBand(context, band),
+  }))
+  branch.filterNodes = [
+    ...branch.baselineNodes,
+    ...branch.paramStages.flatMap((stage) => stage.nodes),
+  ]
+  branch.structureKey = getMonitorStructureKey(state)
+  connectMonitorBranch(branch)
+}
+
+function applyGraphEqCurve(
+  context: AudioContext,
+  branch: MonitorBranch,
+  baselineCurve: CurvePoint[],
+) {
+  if (branch.baselineNodes.length !== GRAPH_EQ_CENTERS.length) {
+    return false
+  }
+
+  branch.baselineNodes.forEach((node, index) => {
+    scheduleAudioParamValue(
+      context,
+      node.gain,
+      sampleCurveGain(baselineCurve, GRAPH_EQ_CENTERS[index]),
+      AUDIO_PARAM_RAMP_SECONDS,
+    )
+  })
+
+  return true
+}
+
+function applyBandStageParameters(
+  context: AudioContext,
+  stage: BandStageGroup,
+  band: EqBand,
+) {
+  const expectedStageCount = getStageCount(band)
+  if (stage.nodes.length !== expectedStageCount) {
+    return false
+  }
+
+  const stageGainDb = 'gainDb' in band ? band.gainDb / expectedStageCount : undefined
+
+  stage.nodes.forEach((node) => {
+    scheduleAudioParamValue(
+      context,
+      node.frequency,
+      band.frequencyHz,
+      AUDIO_PARAM_RAMP_SECONDS,
+    )
+
+    if (band.type === 'peaking') {
+      scheduleAudioParamValue(
+        context,
+        node.gain,
+        stageGainDb ?? band.gainDb,
+        AUDIO_PARAM_RAMP_SECONDS,
+      )
+      scheduleAudioParamValue(context, node.Q, band.q, AUDIO_PARAM_RAMP_SECONDS)
+      return
+    }
+
+    if (band.type === 'lowShelf' || band.type === 'highShelf') {
+      scheduleAudioParamValue(
+        context,
+        node.gain,
+        stageGainDb ?? band.gainDb,
+        AUDIO_PARAM_RAMP_SECONDS,
+      )
+      return
+    }
+
+    scheduleAudioParamValue(context, node.Q, CUT_Q, AUDIO_PARAM_RAMP_SECONDS)
+  })
+
+  return true
+}
+
+function applyBranchStateParameters(
+  context: AudioContext,
+  branch: MonitorBranch,
+  state: MonitorStateSnapshot,
+) {
+  if (branch.structureKey !== getMonitorStructureKey(state)) {
+    return false
+  }
+
+  if (state.monitorBypassed) {
+    return branch.filterNodes.length === 0
+  }
+
+  if (state.monitorBaselineEnabled) {
+    if (!applyGraphEqCurve(context, branch, state.baselineCurve)) {
+      return false
+    }
+  } else if (branch.baselineNodes.length > 0) {
+    return false
+  }
+
+  const activeBands = getMonitorActiveBands(state.bands)
+  if (branch.paramStages.length !== activeBands.length) {
+    return false
+  }
+
+  for (let index = 0; index < activeBands.length; index += 1) {
+    const band = activeBands[index]
+    const stage = branch.paramStages[index]
+
+    if (!stage || stage.bandId !== band.id || stage.type !== band.type) {
+      return false
+    }
+
+    if (!applyBandStageParameters(context, stage, band)) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function scheduleBranchCleanup(graph: MonitorGraph, branchKey: MonitorBranchKey) {
+  clearBranchCleanup(graph)
+  graph.cleanupTimerId = globalThis.setTimeout(() => {
+    const branch = branchKey === 'a' ? graph.branchA : graph.branchB
+    if (graph.activeBranchKey !== branchKey) {
+      resetMonitorBranch(branch)
+      setAudioParamValue(
+        graph.source.context as AudioContext,
+        branch.output.gain,
+        0,
+      )
+    }
+    graph.cleanupTimerId = null
+  }, GRAPH_CROSSFADE_MS)
 }
 
 export function createGraphEqNodes(
@@ -239,6 +561,8 @@ export function createMonitorGraph(
   const wetGain = context.createGain()
   const preAnalyser = context.createAnalyser()
   const postAnalyser = context.createAnalyser()
+  const branchA = createMonitorBranch(context)
+  const branchB = createMonitorBranch(context)
 
   configureAnalyser(preAnalyser)
   configureAnalyser(postAnalyser)
@@ -246,8 +570,15 @@ export function createMonitorGraph(
   source.connect(dryGain)
   dryGain.connect(context.destination)
   source.connect(wetInput)
+  wetInput.connect(preGainNode)
+  preGainNode.connect(preAnalyser)
+  preGainNode.connect(branchA.entry)
+  preGainNode.connect(branchB.entry)
+  branchA.output.connect(wetGain)
+  branchB.output.connect(wetGain)
   wetGain.connect(context.destination)
   wetGain.connect(postAnalyser)
+  branchA.output.gain.value = 1
 
   return {
     source,
@@ -257,7 +588,11 @@ export function createMonitorGraph(
     wetGain,
     preAnalyser,
     postAnalyser,
+    branchA,
+    branchB,
+    activeBranchKey: 'a',
     filterNodes: [],
+    cleanupTimerId: null,
   } satisfies MonitorGraph
 }
 
@@ -270,43 +605,62 @@ export function syncMonitorGraph(
   monitorBaselineEnabled: boolean,
   preGainDb: number,
 ) {
-  safeDisconnect(graph.wetInput)
-  safeDisconnect(graph.preGainNode)
-  graph.filterNodes.forEach((node) => safeDisconnect(node))
+  clearBranchCleanup(graph)
 
-  const shouldApplyEq = !monitorBypassed
-  const baselineNodes =
-    shouldApplyEq && monitorBaselineEnabled
-      ? createGraphEqNodes(context, baselineCurve)
-      : []
-  const paramNodes = shouldApplyEq
-    ? bands
-        .filter((band) => !band.isBypassed)
-        .flatMap((band) => createFilterNodesForBand(context, band))
-    : []
-  const filterNodes = [...baselineNodes, ...paramNodes]
-
-  graph.wetInput.connect(graph.preGainNode)
-  graph.preGainNode.connect(graph.preAnalyser)
-
-  if (filterNodes.length === 0) {
-    graph.preGainNode.connect(graph.wetGain)
-  } else {
-    graph.preGainNode.connect(filterNodes[0])
-
-    filterNodes.forEach((node, index) => {
-      const nextNode = filterNodes[index + 1] ?? graph.wetGain
-      node.connect(nextNode)
-    })
+  const nextState: MonitorStateSnapshot = {
+    bands,
+    baselineCurve,
+    monitorBypassed,
+    monitorBaselineEnabled,
+    preGainDb,
   }
 
-  graph.preGainNode.gain.value = dbToLinear(preGainDb)
-  graph.dryGain.gain.value = 0
-  graph.wetGain.gain.value = 1
-  graph.filterNodes = filterNodes
+  scheduleAudioParamValue(
+    context,
+    graph.preGainNode.gain,
+    dbToLinear(nextState.preGainDb),
+    AUDIO_PARAM_RAMP_SECONDS,
+  )
+  setAudioParamValue(context, graph.dryGain.gain, 0)
+  setAudioParamValue(context, graph.wetGain.gain, 1)
+
+  const activeBranch = getActiveBranch(graph)
+  if (applyBranchStateParameters(context, activeBranch, nextState)) {
+    graph.filterNodes = activeBranch.filterNodes
+    return
+  }
+
+  if (activeBranch.structureKey === null && graph.filterNodes.length === 0) {
+    buildBranchForState(context, activeBranch, nextState)
+    setAudioParamValue(context, activeBranch.output.gain, 1)
+    graph.filterNodes = activeBranch.filterNodes
+    return
+  }
+
+  const inactiveBranch = getInactiveBranch(graph)
+  const nextBranchKey = graph.activeBranchKey === 'a' ? 'b' : 'a'
+
+  buildBranchForState(context, inactiveBranch, nextState)
+
+  scheduleAudioParamValue(
+    context,
+    inactiveBranch.output.gain,
+    1,
+    GRAPH_CROSSFADE_SECONDS,
+  )
+  scheduleAudioParamValue(
+    context,
+    activeBranch.output.gain,
+    0,
+    GRAPH_CROSSFADE_SECONDS,
+  )
+  graph.activeBranchKey = nextBranchKey
+  graph.filterNodes = inactiveBranch.filterNodes
+  scheduleBranchCleanup(graph, graph.activeBranchKey === 'a' ? 'b' : 'a')
 }
 
 export function disconnectMonitorGraph(graph: MonitorGraph) {
+  clearBranchCleanup(graph)
   safeDisconnect(graph.source)
   safeDisconnect(graph.dryGain)
   safeDisconnect(graph.wetInput)
@@ -314,7 +668,13 @@ export function disconnectMonitorGraph(graph: MonitorGraph) {
   safeDisconnect(graph.wetGain)
   safeDisconnect(graph.preAnalyser)
   safeDisconnect(graph.postAnalyser)
-  graph.filterNodes.forEach((node) => safeDisconnect(node))
+  safeDisconnect(graph.branchA.entry)
+  safeDisconnect(graph.branchA.output)
+  safeDisconnect(graph.branchB.entry)
+  safeDisconnect(graph.branchB.output)
+  graph.branchA.filterNodes.forEach((node) => safeDisconnect(node))
+  graph.branchB.filterNodes.forEach((node) => safeDisconnect(node))
+  graph.filterNodes = []
 }
 
 export function mapFrequencyDataToSpectrum(
@@ -393,6 +753,10 @@ export function useEqPlaybackMonitor({
   const attachedElementRef = useRef<HTMLAudioElement | null>(null)
   const spectrumBuffersRef = useRef<SpectrumBuffers | null>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const fftLastSampleAtRef = useRef(0)
+  const pendingSnapshotRef = useRef<MonitorStateSnapshot | null>(null)
+  const syncTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
+  const lastSyncAtRef = useRef(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [fftOverlay, setFftOverlay] = useState<FftOverlay | null>(null)
 
@@ -402,9 +766,64 @@ export function useEqPlaybackMonitor({
       animationFrameRef.current = null
     }
 
+    fftLastSampleAtRef.current = 0
+
     startTransition(() => {
       setFftOverlay(null)
     })
+  })
+
+  const flushPendingGraphSync = useEffectEvent(() => {
+    if (syncTimerRef.current !== null) {
+      globalThis.clearTimeout(syncTimerRef.current)
+      syncTimerRef.current = null
+    }
+
+    const context = audioContextRef.current
+    const graph = graphRef.current
+    const pendingSnapshot = pendingSnapshotRef.current
+
+    if (!context || !graph || !pendingSnapshot) {
+      return
+    }
+
+    syncMonitorGraph(
+      context,
+      graph,
+      pendingSnapshot.bands,
+      pendingSnapshot.baselineCurve,
+      pendingSnapshot.monitorBypassed,
+      pendingSnapshot.monitorBaselineEnabled,
+      pendingSnapshot.preGainDb,
+    )
+    lastSyncAtRef.current = Date.now()
+    setErrorMessage(null)
+  })
+
+  const scheduleGraphSync = useEffectEvent(() => {
+    if (!pendingSnapshotRef.current || !graphRef.current || !audioContextRef.current) {
+      return
+    }
+
+    const now = Date.now()
+    if (lastSyncAtRef.current === 0) {
+      flushPendingGraphSync()
+      return
+    }
+
+    const elapsed = now - lastSyncAtRef.current
+    if (elapsed >= MONITOR_UPDATE_INTERVAL_MS) {
+      flushPendingGraphSync()
+      return
+    }
+
+    if (syncTimerRef.current !== null) {
+      return
+    }
+
+    syncTimerRef.current = globalThis.setTimeout(() => {
+      flushPendingGraphSync()
+    }, MONITOR_UPDATE_INTERVAL_MS - elapsed)
   })
 
   const sampleFftOverlay = useEffectEvent(() => {
@@ -423,6 +842,13 @@ export function useEqPlaybackMonitor({
       return
     }
 
+    const now = performance.now()
+    if (now - fftLastSampleAtRef.current < FFT_OVERLAY_SAMPLE_INTERVAL_MS) {
+      animationFrameRef.current = requestAnimationFrame(sampleFftOverlay)
+      return
+    }
+
+    fftLastSampleAtRef.current = now
     spectrumBuffersRef.current = ensureSpectrumBuffers(
       spectrumBuffersRef.current,
       graph,
@@ -479,6 +905,8 @@ export function useEqPlaybackMonitor({
       graphRef.current = graph
       attachedElementRef.current = audioElement
       spectrumBuffersRef.current = null
+      lastSyncAtRef.current = 0
+      pendingSnapshotRef.current = null
       setErrorMessage(null)
       setFftOverlay(null)
 
@@ -503,24 +931,28 @@ export function useEqPlaybackMonitor({
   }, [audioElement])
 
   useEffect(() => {
-    const context = audioContextRef.current
-    const graph = graphRef.current
-
-    if (!context || !graph) {
-      return
-    }
-
-    syncMonitorGraph(
-      context,
-      graph,
+    pendingSnapshotRef.current = {
       bands,
       baselineCurve,
       monitorBypassed,
       monitorBaselineEnabled,
       preGainDb,
-    )
-    setErrorMessage(null)
-  }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed, preGainDb])
+    }
+    if (lastSyncAtRef.current === 0) {
+      flushPendingGraphSync()
+      return
+    }
+
+    scheduleGraphSync()
+  }, [
+    bands,
+    baselineCurve,
+    monitorBaselineEnabled,
+    monitorBypassed,
+    preGainDb,
+    flushPendingGraphSync,
+    scheduleGraphSync,
+  ])
 
   useEffect(() => {
     if (!audioElement) {
@@ -557,6 +989,11 @@ export function useEqPlaybackMonitor({
     return () => {
       clearFftOverlay()
 
+      if (syncTimerRef.current !== null) {
+        globalThis.clearTimeout(syncTimerRef.current)
+        syncTimerRef.current = null
+      }
+
       const graph = graphRef.current
       if (graph) {
         disconnectMonitorGraph(graph)
@@ -566,7 +1003,7 @@ export function useEqPlaybackMonitor({
         void audioContextRef.current.close()
       }
     }
-  }, [])
+  }, [clearFftOverlay])
 
   return {
     errorMessage,

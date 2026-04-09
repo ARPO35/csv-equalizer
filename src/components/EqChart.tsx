@@ -410,6 +410,8 @@ export function EqChart({
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const hoverCloseTimerRef = useRef<number | null>(null)
+  const frameCommitRef = useRef<number | null>(null)
+  const pendingBandCommitRef = useRef<EqBand | null>(null)
   const [draggingBandId, setDraggingBandId] = useState<string | null>(null)
   const [hoveredBandId, setHoveredBandId] = useState<string | null>(null)
   const [pinnedBandId, setPinnedBandId] = useState<string | null>(null)
@@ -460,7 +462,34 @@ export function EqChart({
     if (hoverCloseTimerRef.current !== null) {
       window.clearTimeout(hoverCloseTimerRef.current)
     }
+
+    if (frameCommitRef.current !== null) {
+      window.cancelAnimationFrame(frameCommitRef.current)
+    }
   }, [])
+
+  function flushPendingBandCommit() {
+    if (!pendingBandCommitRef.current) {
+      return
+    }
+
+    const nextBand = pendingBandCommitRef.current
+    pendingBandCommitRef.current = null
+    onBandCommit(nextBand)
+  }
+
+  function scheduleBandCommit(nextBand: EqBand) {
+    pendingBandCommitRef.current = nextBand
+
+    if (frameCommitRef.current !== null) {
+      return
+    }
+
+    frameCommitRef.current = window.requestAnimationFrame(() => {
+      frameCommitRef.current = null
+      flushPendingBandCommit()
+    })
+  }
 
   function clearHoverTimer() {
     if (hoverCloseTimerRef.current !== null) {
@@ -524,7 +553,7 @@ export function EqChart({
     }
 
     if ('gainDb' in band) {
-      onBandCommit({
+      scheduleBandCommit({
         ...band,
         frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
         gainDb: clampGain(getGainFromY(point.y)),
@@ -532,7 +561,7 @@ export function EqChart({
       return
     }
 
-    onBandCommit({
+    scheduleBandCommit({
       ...band,
       frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
     })
@@ -807,6 +836,7 @@ export function EqChart({
               }}
               onPointerMove={(event) => handlePointerMove(event, band)}
               onPointerUp={(event) => {
+                flushPendingBandCommit()
                 setDraggingBandId(null)
                 if (
                   'hasPointerCapture' in event.currentTarget &&
@@ -815,7 +845,10 @@ export function EqChart({
                   event.currentTarget.releasePointerCapture(event.pointerId)
                 }
               }}
-              onPointerCancel={() => setDraggingBandId(null)}
+              onPointerCancel={() => {
+                flushPendingBandCommit()
+                setDraggingBandId(null)
+              }}
             />
           </g>
         ))}

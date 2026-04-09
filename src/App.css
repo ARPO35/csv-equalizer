@@ -74,6 +74,35 @@
   display: flex;
   flex-direction: column;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 149, 84, 0.85) var(--scrollbar-track);
+}
+
+.panel::-webkit-scrollbar {
+  width: 0.8rem;
+}
+
+.panel::-webkit-scrollbar-track {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), var(--scrollbar-track));
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.panel::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 3px solid var(--scrollbar-thumb-border);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 0.5rem 1.2rem rgba(255, 149, 84, 0.14);
+}
+
+.panel::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.panel::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .panel-section {

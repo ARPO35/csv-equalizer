@@ -26,7 +26,7 @@ function getAudioContext() {
 
 function magnitudesToDbResponse(
   frequencies: number[],
-  magnitudes: Float32Array,
+  magnitudes: Float32Array<ArrayBufferLike>,
 ): CurvePoint[] {
   return frequencies.map((frequencyHz, index) => ({
     frequencyHz,
@@ -36,9 +36,9 @@ function magnitudesToDbResponse(
 
 function createSingleFilterResponse(
   band: EqBand,
-  frequencies: number[],
+  frequencyArray: Float32Array,
   gainDbOverride?: number,
-): CurvePoint[] {
+): Float32Array {
   const context = getAudioContext()
   const filter = context.createBiquadFilter()
   filter.frequency.value = band.frequencyHz
@@ -55,12 +55,15 @@ function createSingleFilterResponse(
     filter.Q.value = CUT_Q
   }
 
-  const frequencyArray = Float32Array.from(frequencies)
-  const magnitudes = new Float32Array(frequencies.length)
-  const phases = new Float32Array(frequencies.length)
-  filter.getFrequencyResponse(frequencyArray, magnitudes, phases)
+  const magnitudes = new Float32Array(frequencyArray.length)
+  const phases = new Float32Array(frequencyArray.length)
+  filter.getFrequencyResponse(
+    frequencyArray as Float32Array<ArrayBuffer>,
+    magnitudes,
+    phases,
+  )
 
-  return magnitudesToDbResponse(frequencies, magnitudes)
+  return magnitudes
 }
 
 function getStageCount(band: EqBand) {
@@ -72,33 +75,30 @@ function getStageCount(band: EqBand) {
 
 function computeStageResponse(
   band: EqBand,
-  frequencies: number[],
-): CurvePoint[] {
+  frequencyArray: Float32Array,
+): Float32Array {
   const stageCount = getStageCount(band)
   const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
+  const accumulatedMagnitudes = new Float32Array(frequencyArray.length)
+  accumulatedMagnitudes.fill(1)
 
-  return Array.from({ length: stageCount }).reduce<CurvePoint[] | null>(
-    (sumCurve) => {
-      const stageCurve = createSingleFilterResponse(
-        band,
-        frequencies,
-        stageGainDb,
-      )
-      if (!sumCurve) {
-        return stageCurve
-      }
+  for (let index = 0; index < stageCount; index += 1) {
+    const stageMagnitudes = createSingleFilterResponse(
+      band,
+      frequencyArray,
+      stageGainDb,
+    )
 
-      return sumCurve.map((point, index) => ({
-        frequencyHz: point.frequencyHz,
-        gainDb: point.gainDb + stageCurve[index].gainDb,
-      }))
-    },
-    null,
-  ) ?? []
+    for (let magnitudeIndex = 0; magnitudeIndex < stageMagnitudes.length; magnitudeIndex += 1) {
+      accumulatedMagnitudes[magnitudeIndex] *= stageMagnitudes[magnitudeIndex]
+    }
+  }
+
+  return accumulatedMagnitudes
 }
 
-function computeBandResponse(band: EqBand, frequencies: number[]) {
-  return computeStageResponse(band, frequencies)
+function computeBandResponse(band: EqBand, frequencyArray: Float32Array) {
+  return computeStageResponse(band, frequencyArray)
 }
 
 export function computeEqCurve(
@@ -116,13 +116,18 @@ export function computeEqCurve(
     }))
   }
 
-  return bands.reduce<CurvePoint[]>((sumCurve, band) => {
-    const bandCurve = computeBandResponse(band, frequencies)
-    return sumCurve.map((point, index) => ({
-      frequencyHz: point.frequencyHz,
-      gainDb: point.gainDb + bandCurve[index].gainDb,
-    }))
-  }, frequencies.map((frequencyHz) => ({ frequencyHz, gainDb: 0 })))
+  const frequencyArray = Float32Array.from(frequencies)
+  const combinedMagnitudes = new Float32Array(frequencyArray.length)
+  combinedMagnitudes.fill(1)
+
+  bands.forEach((band) => {
+    const bandMagnitudes = computeBandResponse(band, frequencyArray)
+    for (let index = 0; index < bandMagnitudes.length; index += 1) {
+      combinedMagnitudes[index] *= bandMagnitudes[index]
+    }
+  })
+
+  return magnitudesToDbResponse(frequencies, combinedMagnitudes)
 }
 
 export function sumCurveWithEq(baseCurve: CurvePoint[], eqCurve: CurvePoint[]) {
