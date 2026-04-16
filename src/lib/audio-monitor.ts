@@ -481,6 +481,15 @@ export function useEqPlaybackMonitor({
       spectrumBuffersRef.current = null
       setErrorMessage(null)
       setFftOverlay(null)
+      syncMonitorGraph(
+        context,
+        graph,
+        bands,
+        baselineCurve,
+        monitorBypassed,
+        monitorBaselineEnabled,
+        preGainDb,
+      )
 
       const resumeContext = () => {
         if (context.state === 'suspended') {

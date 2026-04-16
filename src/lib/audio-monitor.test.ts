@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FFT_ANALYSER_MAX_DB,
   FFT_ANALYSER_MIN_DB,
@@ -7,6 +8,7 @@ import {
   disconnectMonitorGraph,
   mapFrequencyDataToSpectrum,
   syncMonitorGraph,
+  useEqPlaybackMonitor,
 } from './audio-monitor'
 import type { CurvePoint, EqBand } from '../types'
 
@@ -64,9 +66,14 @@ function getConnections(node: unknown) {
 class FakeAudioContext {
   destination = new FakeAudioNode()
   sampleRate = 48_000
+  gainNodes: FakeGainNode[] = []
+  analyserNodes: FakeAnalyserNode[] = []
+  mediaSources: FakeMediaElementSourceNode[] = []
 
   createGain() {
-    return new FakeGainNode()
+    const node = new FakeGainNode()
+    this.gainNodes.push(node)
+    return node
   }
 
   createBiquadFilter() {
@@ -74,11 +81,15 @@ class FakeAudioContext {
   }
 
   createAnalyser() {
-    return new FakeAnalyserNode()
+    const node = new FakeAnalyserNode()
+    this.analyserNodes.push(node)
+    return node
   }
 
   createMediaElementSource() {
-    return new FakeMediaElementSourceNode()
+    const node = new FakeMediaElementSourceNode()
+    this.mediaSources.push(node)
+    return node
   }
 }
 
@@ -88,7 +99,33 @@ const baselineCurve: CurvePoint[] = [
   { frequencyHz: 20000, gainDb: -1 },
 ]
 
+let lastCreatedContext: FakeAudioContext | null = null
+
+class HookFakeAudioContext extends FakeAudioContext {
+  constructor() {
+    super()
+    lastCreatedContext = this
+  }
+
+  state: AudioContextState = 'running'
+
+  close() {
+    this.state = 'closed'
+    return Promise.resolve()
+  }
+
+  resume() {
+    this.state = 'running'
+    return Promise.resolve()
+  }
+}
+
 describe('audio monitor graph', () => {
+  afterEach(() => {
+    lastCreatedContext = null
+    vi.restoreAllMocks()
+  })
+
   it('routes dry and wet monitor paths from the media source', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
@@ -213,6 +250,44 @@ describe('audio monitor graph', () => {
     expect(getConnections(graph.wetInput)).toEqual([])
     expect(getConnections(graph.preGainNode)).toEqual([])
     expect(getConnections(graph.wetGain)).toEqual([])
+  })
+
+  it('synchronizes the monitor graph immediately when an audio element is attached', () => {
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: HookFakeAudioContext,
+    })
+    const audioElement = document.createElement('audio')
+
+    renderHook(
+      ({ element }) =>
+        useEqPlaybackMonitor({
+          audioElement: element,
+          bands: [],
+          baselineCurve,
+          monitorBypassed: false,
+          monitorBaselineEnabled: false,
+          preGainDb: -8,
+        }),
+      {
+        initialProps: {
+          element: audioElement,
+        },
+      },
+    )
+
+    expect(lastCreatedContext).toBeTruthy()
+    const context = lastCreatedContext as HookFakeAudioContext
+    const wetInput = context.gainNodes[1]
+    const preGainNode = context.gainNodes[2]
+    const wetGain = context.gainNodes[3]
+    const preAnalyser = context.analyserNodes[0]
+
+    expect(getConnections(wetInput)).toEqual([preGainNode])
+    expect(getConnections(preGainNode)).toEqual([
+      preAnalyser as unknown as FakeAudioNode,
+      wetGain as unknown as FakeAudioNode,
+    ])
   })
 
   it('interpolates analyser bins onto the log-spaced overlay grid without band averaging', () => {
