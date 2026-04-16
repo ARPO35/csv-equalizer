@@ -43,6 +43,7 @@ export type CutBand = BaseBand & {
 export type EqBand = PeakingBand | ShelfBand | CutBand
 
 export type EqBandType = EqBand['type']
+export type BandUpdateMode = 'smooth' | 'immediate'
 
 export type ProjectPresetV1 = {
   version: 1

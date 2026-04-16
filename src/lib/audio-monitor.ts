@@ -61,6 +61,16 @@ type MonitorGraph = {
   preAnalyser: AnalyserNode
   postAnalyser: AnalyserNode
   filterNodes: BiquadFilterNode[]
+  filterDescriptors: FilterDescriptor[]
+  isConfigured: boolean
+}
+
+type FilterDescriptor = {
+  key: string
+  type: BiquadFilterType
+  frequencyHz: number
+  gainDb?: number
+  q?: number
 }
 
 type SpectrumBuffers = {
@@ -173,33 +183,101 @@ function sampleCurveGain(curve: CurvePoint[], frequencyHz: number) {
   return 0
 }
 
-function createFilterNodesForBand(context: AudioContext, band: EqBand) {
+function setAudioParamValue(param: AudioParam, value: number) {
+  param.value = value
+}
+
+function createDescriptorNode(context: AudioContext, descriptor: FilterDescriptor) {
+  const filter = context.createBiquadFilter()
+  filter.type = descriptor.type
+  return filter
+}
+
+function applyDescriptorToNode(
+  node: BiquadFilterNode,
+  descriptor: FilterDescriptor,
+) {
+  node.type = descriptor.type
+  setAudioParamValue(node.frequency, descriptor.frequencyHz)
+
+  if (descriptor.gainDb !== undefined) {
+    setAudioParamValue(node.gain, descriptor.gainDb)
+  }
+
+  if (descriptor.q !== undefined) {
+    setAudioParamValue(node.Q, descriptor.q)
+  }
+}
+
+function createBaselineDescriptors(baselineCurve: CurvePoint[]): FilterDescriptor[] {
+  return GRAPH_EQ_CENTERS.map((center, index) => ({
+    key: `baseline:${index}`,
+    type:
+      index === 0
+        ? 'lowshelf'
+        : index === GRAPH_EQ_CENTERS.length - 1
+          ? 'highshelf'
+          : 'peaking',
+    frequencyHz: center,
+    gainDb: sampleCurveGain(baselineCurve, center),
+    q:
+      index === 0 || index === GRAPH_EQ_CENTERS.length - 1
+        ? undefined
+        : GRAPH_EQ_Q,
+  }))
+}
+
+function createBandDescriptors(band: EqBand): FilterDescriptor[] {
   const stageCount =
     band.type === 'lowCut' || band.type === 'highCut'
       ? band.slopeDbPerOct / 12
       : band.slopeDbPerOct / 6
   const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
 
-  return Array.from({ length: stageCount }, () => {
-    const filter = context.createBiquadFilter()
-    filter.frequency.value = band.frequencyHz
-
+  return Array.from({ length: stageCount }, (_, index) => {
     if (band.type === 'peaking') {
-      filter.type = 'peaking'
-      filter.gain.value = stageGainDb ?? band.gainDb
-      filter.Q.value = band.q
-      return filter
+      return {
+        key: `${band.id}:${index}`,
+        type: 'peaking',
+        frequencyHz: band.frequencyHz,
+        gainDb: stageGainDb ?? band.gainDb,
+        q: band.q,
+      } satisfies FilterDescriptor
     }
 
     if (band.type === 'lowShelf' || band.type === 'highShelf') {
-      filter.type = band.type === 'lowShelf' ? 'lowshelf' : 'highshelf'
-      filter.gain.value = stageGainDb ?? band.gainDb
-      return filter
+      return {
+        key: `${band.id}:${index}`,
+        type: band.type === 'lowShelf' ? 'lowshelf' : 'highshelf',
+        frequencyHz: band.frequencyHz,
+        gainDb: stageGainDb ?? band.gainDb,
+      } satisfies FilterDescriptor
     }
 
-    filter.type = band.type === 'lowCut' ? 'highpass' : 'lowpass'
-    filter.Q.value = CUT_Q
-    return filter
+    return {
+      key: `${band.id}:${index}`,
+      type: band.type === 'lowCut' ? 'highpass' : 'lowpass',
+      frequencyHz: band.frequencyHz,
+      q: CUT_Q,
+    } satisfies FilterDescriptor
+  })
+}
+
+function haveSameFilterStructure(
+  currentDescriptors: FilterDescriptor[],
+  nextDescriptors: FilterDescriptor[],
+) {
+  if (currentDescriptors.length !== nextDescriptors.length) {
+    return false
+  }
+
+  return currentDescriptors.every((descriptor, index) => {
+    const nextDescriptor = nextDescriptors[index]
+    return Boolean(
+      nextDescriptor &&
+        descriptor.key === nextDescriptor.key &&
+        descriptor.type === nextDescriptor.type,
+    )
   })
 }
 
@@ -258,6 +336,8 @@ export function createMonitorGraph(
     preAnalyser,
     postAnalyser,
     filterNodes: [],
+    filterDescriptors: [],
+    isConfigured: false,
   } satisfies MonitorGraph
 }
 
@@ -270,40 +350,61 @@ export function syncMonitorGraph(
   monitorBaselineEnabled: boolean,
   preGainDb: number,
 ) {
-  safeDisconnect(graph.wetInput)
-  safeDisconnect(graph.preGainNode)
-  graph.filterNodes.forEach((node) => safeDisconnect(node))
-
   const shouldApplyEq = !monitorBypassed
-  const baselineNodes =
+  const baselineDescriptors =
     shouldApplyEq && monitorBaselineEnabled
-      ? createGraphEqNodes(context, baselineCurve)
+      ? createBaselineDescriptors(baselineCurve)
       : []
-  const paramNodes = shouldApplyEq
+  const paramDescriptors = shouldApplyEq
     ? bands
         .filter((band) => !band.isBypassed)
-        .flatMap((band) => createFilterNodesForBand(context, band))
+        .flatMap((band) => createBandDescriptors(band))
     : []
-  const filterNodes = [...baselineNodes, ...paramNodes]
+  const filterDescriptors = [...baselineDescriptors, ...paramDescriptors]
+  const structureChanged = !haveSameFilterStructure(
+    graph.filterDescriptors,
+    filterDescriptors,
+  )
 
-  graph.wetInput.connect(graph.preGainNode)
-  graph.preGainNode.connect(graph.preAnalyser)
-
-  if (filterNodes.length === 0) {
-    graph.preGainNode.connect(graph.wetGain)
-  } else {
-    graph.preGainNode.connect(filterNodes[0])
-
-    filterNodes.forEach((node, index) => {
-      const nextNode = filterNodes[index + 1] ?? graph.wetGain
-      node.connect(nextNode)
-    })
+  if (structureChanged) {
+    graph.filterNodes.forEach((node) => safeDisconnect(node))
+    graph.filterNodes = filterDescriptors.map((descriptor) =>
+      createDescriptorNode(context, descriptor),
+    )
   }
 
-  graph.preGainNode.gain.value = dbToLinear(preGainDb)
-  graph.dryGain.gain.value = 0
-  graph.wetGain.gain.value = 1
-  graph.filterNodes = filterNodes
+  filterDescriptors.forEach((descriptor, index) => {
+    const node = graph.filterNodes[index]
+    if (!node) {
+      return
+    }
+
+    applyDescriptorToNode(node, descriptor)
+  })
+
+  if (!graph.isConfigured || structureChanged) {
+    safeDisconnect(graph.wetInput)
+    safeDisconnect(graph.preGainNode)
+    graph.wetInput.connect(graph.preGainNode)
+    graph.preGainNode.connect(graph.preAnalyser)
+
+    if (graph.filterNodes.length === 0) {
+      graph.preGainNode.connect(graph.wetGain)
+    } else {
+      graph.preGainNode.connect(graph.filterNodes[0])
+
+      graph.filterNodes.forEach((node, index) => {
+        const nextNode = graph.filterNodes[index + 1] ?? graph.wetGain
+        node.connect(nextNode)
+      })
+    }
+  }
+
+  setAudioParamValue(graph.preGainNode.gain, dbToLinear(preGainDb))
+  setAudioParamValue(graph.dryGain.gain, 0)
+  setAudioParamValue(graph.wetGain.gain, 1)
+  graph.filterDescriptors = filterDescriptors
+  graph.isConfigured = true
 }
 
 export function disconnectMonitorGraph(graph: MonitorGraph) {
@@ -315,6 +416,7 @@ export function disconnectMonitorGraph(graph: MonitorGraph) {
   safeDisconnect(graph.preAnalyser)
   safeDisconnect(graph.postAnalyser)
   graph.filterNodes.forEach((node) => safeDisconnect(node))
+  graph.isConfigured = false
 }
 
 export function mapFrequencyDataToSpectrum(

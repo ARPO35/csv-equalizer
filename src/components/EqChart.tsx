@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { convertBandType, createDefaultBand, describeBand } from '../lib/bands'
 import type {
+  BandUpdateMode,
   CurvePoint,
   EqBand,
   EqBandType,
@@ -367,6 +368,14 @@ function getFadeOpacity(diffDb: number) {
   return (diffDb - FFT_FADE_FLOOR_DB) / (FFT_FADE_CEIL_DB - FFT_FADE_FLOOR_DB)
 }
 
+function commitBand(
+  onBandCommit: (band: EqBand, mode: BandUpdateMode) => void,
+  band: EqBand,
+  mode: BandUpdateMode,
+) {
+  onBandCommit(band, mode)
+}
+
 export function EqChart({
   baselineCurve,
   bandCurve,
@@ -398,7 +407,7 @@ export function EqChart({
   showFlatHint: boolean
   viewMinDb: number
   viewMaxDb: number
-  onBandCommit: (band: EqBand) => void
+  onBandCommit: (band: EqBand, mode: BandUpdateMode) => void
   onBandCreate: (band: EqBand) => void
   onBandDelete: (bandId: string) => void
   onBandToggleBypass: (bandId: string) => void
@@ -524,18 +533,26 @@ export function EqChart({
     }
 
     if ('gainDb' in band) {
-      onBandCommit({
-        ...band,
-        frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
-        gainDb: clampGain(getGainFromY(point.y)),
-      })
+      commitBand(
+        onBandCommit,
+        {
+          ...band,
+          frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
+          gainDb: clampGain(getGainFromY(point.y)),
+        },
+        'smooth',
+      )
       return
     }
 
-    onBandCommit({
-      ...band,
-      frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
-    })
+    commitBand(
+      onBandCommit,
+      {
+        ...band,
+        frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
+      },
+      'smooth',
+    )
   }
 
   function handleChartWheel(event: WheelEvent<HTMLDivElement>) {
@@ -547,10 +564,14 @@ export function EqChart({
     const direction = event.deltaY < 0 ? 1 : -1
 
     if (draggingBand.type === 'peaking') {
-      onBandCommit({
-        ...draggingBand,
-        q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
-      })
+      commitBand(
+        onBandCommit,
+        {
+          ...draggingBand,
+          q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
+        },
+        'immediate',
+      )
       return
     }
 
@@ -565,10 +586,14 @@ export function EqChart({
         return
       }
 
-      onBandCommit({
-        ...draggingBand,
-        slopeDbPerOct: nextSlope,
-      })
+      commitBand(
+        onBandCommit,
+        {
+          ...draggingBand,
+          slopeDbPerOct: nextSlope,
+        },
+        'immediate',
+      )
       return
     }
 
@@ -586,10 +611,14 @@ export function EqChart({
       return
     }
 
-    onBandCommit({
-      ...draggingBand,
-      slopeDbPerOct: nextSlope,
-    })
+    commitBand(
+      onBandCommit,
+      {
+        ...draggingBand,
+        slopeDbPerOct: nextSlope,
+      },
+      'immediate',
+    )
   }
 
   function startEditing(field: EditableField, value: string) {
@@ -610,7 +639,7 @@ export function EqChart({
 
     const nextBand = updateBandField(popupBand, editingField, editingDraft)
     if (nextBand) {
-      onBandCommit(nextBand)
+      commitBand(onBandCommit, nextBand, 'immediate')
     }
     stopEditing()
   }
@@ -808,6 +837,9 @@ export function EqChart({
               onPointerMove={(event) => handlePointerMove(event, band)}
               onPointerUp={(event) => {
                 setDraggingBandId(null)
+                if (draggingBand) {
+                  commitBand(onBandCommit, draggingBand, 'immediate')
+                }
                 if (
                   'hasPointerCapture' in event.currentTarget &&
                   event.currentTarget.hasPointerCapture(event.pointerId)
@@ -875,7 +907,11 @@ export function EqChart({
             <select
               value={popupBand.type}
               onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                onBandCommit(convertBandType(popupBand, event.target.value as EqBandType))
+                commitBand(
+                  onBandCommit,
+                  convertBandType(popupBand, event.target.value as EqBandType),
+                  'immediate',
+                )
               }
             >
               <option value="peaking">Bell</option>

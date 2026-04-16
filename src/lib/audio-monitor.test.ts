@@ -238,6 +238,75 @@ describe('audio monitor graph', () => {
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBeCloseTo(1.2)
   })
 
+  it('reuses filter nodes when only continuous band parameters change', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+    const initialBands: EqBand[] = [
+      {
+        id: 'band-1',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 4,
+        q: 1.1,
+        slopeDbPerOct: 12,
+      },
+    ]
+
+    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
+
+    const initialNode = graph.filterNodes[0]
+
+    const updatedBand: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1600,
+      isBypassed: false,
+      gainDb: 6,
+      q: 1.8,
+      slopeDbPerOct: 12,
+    }
+
+    syncMonitorGraph(context, graph, [updatedBand], baselineCurve, false, false, -6)
+
+    expect(graph.filterNodes[0]).toBe(initialNode)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).frequency.value).toBe(1600)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBe(3)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBe(1.8)
+    expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-6 / 20))
+  })
+
+  it('rebuilds filter nodes when the filter topology changes', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+    const initialBands: EqBand[] = [
+      {
+        id: 'band-1',
+        type: 'lowCut',
+        frequencyHz: 120,
+        isBypassed: false,
+        slopeDbPerOct: 24,
+      },
+    ]
+
+    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
+
+    const initialNodes = [...graph.filterNodes]
+
+    syncMonitorGraph(
+      context,
+      graph,
+      [{ ...initialBands[0], slopeDbPerOct: 48 }],
+      baselineCurve,
+      false,
+      false,
+      -8,
+    )
+
+    expect(graph.filterNodes).toHaveLength(4)
+    expect(graph.filterNodes[0]).not.toBe(initialNodes[0])
+  })
+
   it('disconnects the monitor graph cleanly', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))

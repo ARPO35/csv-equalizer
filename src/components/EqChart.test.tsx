@@ -139,7 +139,7 @@ describe('EqChart', () => {
     expect(onBandCommit).toHaveBeenLastCalledWith({
       ...band,
       frequencyHz: 1500,
-    })
+    }, 'immediate')
   })
 
   it('adjusts Q with the mouse wheel while dragging a peaking band', () => {
@@ -179,12 +179,50 @@ describe('EqChart', () => {
     expect(onBandCommit).toHaveBeenCalledWith({
       ...band,
       q: 1.15,
-    })
+    }, 'immediate')
 
     fireEvent.pointerUp(node, { pointerId: 1 })
+    expect(onBandCommit).toHaveBeenLastCalledWith(band, 'immediate')
     onBandCommit.mockClear()
     fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
     expect(onBandCommit).not.toHaveBeenCalled()
+  })
+
+  it('marks pointer drag updates as smooth', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+
+    fireEvent.pointerMove(node, {
+      pointerId: 1,
+      clientX: 650,
+      clientY: 320,
+    })
+
+    expect(onBandCommit).toHaveBeenCalledTimes(1)
+    expect(onBandCommit.mock.calls[0][1]).toBe('smooth')
   })
 
   it('adjusts shelf slope with the mouse wheel while dragging', () => {
@@ -223,7 +261,7 @@ describe('EqChart', () => {
     expect(onBandCommit).toHaveBeenCalledWith({
       ...band,
       slopeDbPerOct: 18,
-    })
+    }, 'immediate')
   })
 
   it('adjusts cut slope with the mouse wheel while dragging', () => {
@@ -261,7 +299,7 @@ describe('EqChart', () => {
     expect(onBandCommit).toHaveBeenCalledWith({
       ...band,
       slopeDbPerOct: 36,
-    })
+    }, 'immediate')
   })
 
   it('toggles band bypass from the popover', async () => {

@@ -9,6 +9,7 @@ import {
 } from 'react'
 import './App.css'
 import { EqChart } from './components/EqChart'
+import { useAppliedBands } from './lib/applied-bands'
 import { useEqPlaybackMonitor } from './lib/audio-monitor'
 import { describeBand, sortBandsByFrequency } from './lib/bands'
 import { createLogFrequencyGrid, resampleCurve } from './lib/curve'
@@ -21,7 +22,7 @@ import {
   serializePreset,
 } from './lib/files'
 import { EqEditorProvider, useEqEditor } from './state'
-import type { EqBand, ProjectPresetV1 } from './types'
+import type { BandUpdateMode, EqBand, ProjectPresetV1 } from './types'
 
 function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
@@ -46,10 +47,13 @@ function EditorShell() {
   const [visualGainDraft, setVisualGainDraft] = useState('')
   const [isEditingGridPoints, setIsEditingGridPoints] = useState(false)
   const [gridPointDraft, setGridPointDraft] = useState('')
+  const { appliedBands, flushAppliedBands, markNextBandChange } = useAppliedBands(
+    state.bands,
+  )
 
   const activeBands = useMemo(
-    () => state.bands.filter((band) => !band.isBypassed),
-    [state.bands],
+    () => appliedBands.filter((band) => !band.isBypassed),
+    [appliedBands],
   )
   const workingFrequencies = useMemo(
     () => createLogFrequencyGrid(state.gridPointCount),
@@ -83,7 +87,7 @@ function EditorShell() {
   const hasClipRisk = rawOutputPeakDb + effectivePreGainDb > 0
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
   const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
-  const canExportCurve = outputCurve.length > 0
+  const canExportCurve = workingBaselineCurve.length > 0
   const preset = useMemo<ProjectPresetV1>(
     () => ({
       version: 1,
@@ -94,7 +98,7 @@ function EditorShell() {
   )
   const { errorMessage: monitorErrorMessage, fftOverlay } = useEqPlaybackMonitor({
     audioElement,
-    bands: state.bands,
+    bands: appliedBands,
     baselineCurve: state.baselineCurve,
     monitorBypassed: state.monitorBypassed,
     monitorBaselineEnabled: state.monitorBaselineEnabled,
@@ -233,7 +237,31 @@ function EditorShell() {
     audioElement.load()
   }, [audioElement])
 
-  function updateBand(nextBand: EqBand) {
+  function updateBand(nextBand: EqBand, mode: BandUpdateMode) {
+    markNextBandChange(mode)
+
+    const currentBand = state.bands.find((band) => band.id === nextBand.id)
+    if (currentBand === nextBand) {
+      flushAppliedBands()
+      return
+    }
+
+    if (
+      currentBand &&
+      currentBand.id === nextBand.id &&
+      currentBand.type === nextBand.type &&
+      currentBand.frequencyHz === nextBand.frequencyHz &&
+      currentBand.isBypassed === nextBand.isBypassed &&
+      currentBand.slopeDbPerOct === nextBand.slopeDbPerOct &&
+      ('gainDb' in currentBand ? currentBand.gainDb : undefined) ===
+        ('gainDb' in nextBand ? nextBand.gainDb : undefined) &&
+      ('q' in currentBand ? currentBand.q : undefined) ===
+        ('q' in nextBand ? nextBand.q : undefined)
+    ) {
+      flushAppliedBands()
+      return
+    }
+
     dispatch({ type: 'update-band', payload: nextBand })
   }
 
@@ -323,10 +351,17 @@ function EditorShell() {
 
   async function handleExportCurve() {
     try {
+      const targetOutputCurve = sumCurveWithEq(
+        workingBaselineCurve,
+        computeEqCurve(
+          state.bands.filter((band) => !band.isBypassed),
+          workingFrequencies,
+        ),
+      )
       const result = await saveTextFile({
         suggestedName: `${getBaseFileName()}-eq.csv`,
         mimeType: 'text/csv',
-        contents: serializeCurveCsv(outputCurve),
+        contents: serializeCurveCsv(targetOutputCurve),
         handle: exportHandleRef.current,
       })
       exportHandleRef.current = result.handle
