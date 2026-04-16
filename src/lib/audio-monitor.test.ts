@@ -1,9 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   AUDIO_PARAM_RAMP_MS,
   FFT_ANALYSER_MAX_DB,
   FFT_ANALYSER_MIN_DB,
-  GRAPH_CROSSFADE_MS,
   createGraphEqNodes,
   createMonitorGraph,
   disconnectMonitorGraph,
@@ -85,14 +84,7 @@ class FakeAnalyserNode extends FakeAudioNode {
   }
 }
 
-class FakeMediaElementSourceNode extends FakeAudioNode {
-  context: FakeAudioContext
-
-  constructor(context: FakeAudioContext) {
-    super()
-    this.context = context
-  }
-}
+class FakeMediaElementSourceNode extends FakeAudioNode {}
 
 function getConnections(node: unknown) {
   return (node as FakeAudioNode).connections
@@ -116,7 +108,7 @@ class FakeAudioContext {
   }
 
   createMediaElementSource() {
-    return new FakeMediaElementSourceNode(this)
+    return new FakeMediaElementSourceNode()
   }
 }
 
@@ -133,24 +125,11 @@ describe('audio monitor graph', () => {
 
     expect(getConnections(graph.source)).toHaveLength(2)
     expect(getConnections(graph.dryGain)).toEqual([context.destination])
-    expect(getConnections(graph.wetInput)).toEqual([
-      graph.preGainNode as unknown as FakeAudioNode,
-    ])
-    expect(getConnections(graph.preGainNode)).toEqual([
-      graph.preAnalyser as unknown as FakeAudioNode,
-      graph.branchA.entry as unknown as FakeAudioNode,
-      graph.branchB.entry as unknown as FakeAudioNode,
-    ])
-    expect(getConnections(graph.branchA.output)).toEqual([
-      graph.wetGain as unknown as FakeAudioNode,
-    ])
-    expect(getConnections(graph.branchB.output)).toEqual([
-      graph.wetGain as unknown as FakeAudioNode,
-    ])
     expect(getConnections(graph.wetGain)).toEqual([
       context.destination,
       graph.postAnalyser as unknown as FakeAudioNode,
     ])
+    expect(getConnections(graph.preGainNode)).toEqual([])
     expect(graph.preAnalyser.fftSize).toBe(8192)
     expect(graph.preAnalyser.minDecibels).toBe(FFT_ANALYSER_MIN_DB)
     expect(graph.postAnalyser.maxDecibels).toBe(FFT_ANALYSER_MAX_DB)
@@ -194,8 +173,8 @@ describe('audio monitor graph', () => {
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
     expect((graph.filterNodes[30] as unknown as FakeBiquadFilterNode).type).toBe('highshelf')
     expect((graph.filterNodes[31] as unknown as FakeBiquadFilterNode).type).toBe('lowpass')
-    expect(graph.activeBranchKey).toBe('a')
-    expect(getConnections(graph.branchA.entry)).toEqual([
+    expect(getConnections(graph.preGainNode)).toEqual([
+      graph.preAnalyser as unknown as FakeAudioNode,
       graph.filterNodes[0] as unknown as FakeAudioNode,
     ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-10 / 20))
@@ -219,13 +198,29 @@ describe('audio monitor graph', () => {
     syncMonitorGraph(context, graph, bands, baselineCurve, true, false, -8)
 
     expect(graph.filterNodes).toHaveLength(0)
-    expect(graph.activeBranchKey).toBe('a')
-    expect(getConnections(graph.branchA.entry)).toEqual([
-      graph.branchA.output as unknown as FakeAudioNode,
+    expect(getConnections(graph.wetInput)).toEqual([
+      graph.preGainNode as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(graph.preGainNode)).toEqual([
+      graph.preAnalyser as unknown as FakeAudioNode,
+      graph.wetGain as unknown as FakeAudioNode,
     ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
     expect(graph.dryGain.gain.value).toBe(0)
     expect(graph.wetGain.gain.value).toBe(1)
+  })
+
+  it('keeps a playable wet chain even when no EQ nodes are active', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+
+    syncMonitorGraph(context, graph, [], baselineCurve, false, false, -8)
+
+    expect(graph.filterNodes).toHaveLength(0)
+    expect(getConnections(graph.preGainNode)).toEqual([
+      graph.preAnalyser as unknown as FakeAudioNode,
+      graph.wetGain as unknown as FakeAudioNode,
+    ])
   })
 
   it('builds stacked filter stages for shelf slopes in the monitor chain', () => {
@@ -265,9 +260,6 @@ describe('audio monitor graph', () => {
     syncMonitorGraph(context, graph, [initialBand], baselineCurve, false, false, -8)
 
     const firstNode = graph.filterNodes[0] as unknown as FakeBiquadFilterNode
-    const firstPreGainEvents = [
-      ...(graph.preGainNode.gain as unknown as FakeAudioParam).events,
-    ]
 
     syncMonitorGraph(
       context,
@@ -295,118 +287,42 @@ describe('audio monitor graph', () => {
       time: 1 + AUDIO_PARAM_RAMP_MS / 1000,
       value: 1.6,
     })
-    expect((graph.preGainNode.gain as unknown as FakeAudioParam).events.length).toBeGreaterThan(
-      firstPreGainEvents.length,
-    )
-  })
-
-  it('keeps the first synchronized graph on the current active branch', () => {
-    const context = new FakeAudioContext() as unknown as AudioContext
-    const graph = createMonitorGraph(context, document.createElement('audio'))
-    const band: EqBand = {
-      id: 'band-1',
-      type: 'peaking',
-      frequencyHz: 1000,
-      isBypassed: false,
-      gainDb: 3,
-      q: 1.1,
-      slopeDbPerOct: 12,
-    }
-
-    syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
-
-    expect(graph.activeBranchKey).toBe('a')
-    expect(graph.branchA.filterNodes).toHaveLength(2)
-    expect(graph.branchB.filterNodes).toHaveLength(0)
-    expect((graph.branchA.output.gain as unknown as FakeAudioParam).events.at(-1)).toEqual({
-      type: 'set',
-      time: 1,
-      value: 1,
-    })
-  })
-
-  it('uses immediate set operations for zero-ramp gain switching', () => {
-    const context = new FakeAudioContext() as unknown as AudioContext
-    const graph = createMonitorGraph(context, document.createElement('audio'))
-    const band: EqBand = {
-      id: 'band-1',
-      type: 'peaking',
-      frequencyHz: 1000,
-      isBypassed: false,
-      gainDb: 3,
-      q: 1.1,
-      slopeDbPerOct: 12,
-    }
-
-    syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
-
-    expect((graph.branchA.output.gain as unknown as FakeAudioParam).events).toContainEqual({
-      type: 'set',
-      time: 1,
-      value: 1,
-    })
-    expect((graph.branchA.output.gain as unknown as FakeAudioParam).events).not.toContainEqual({
+    expect((graph.preGainNode.gain as unknown as FakeAudioParam).events.at(-1)).toEqual({
       type: 'ramp',
-      time: 1,
-      value: 1,
+      time: 1 + AUDIO_PARAM_RAMP_MS / 1000,
+      value: 10 ** (-6 / 20),
     })
   })
 
-  it('crossfades to a rebuilt branch when the monitor structure changes', () => {
-    vi.useFakeTimers()
-    const context = new FakeAudioContext() as unknown as AudioContext
-    const graph = createMonitorGraph(context, document.createElement('audio'))
-    const firstBand: EqBand = {
-      id: 'band-1',
-      type: 'peaking',
-      frequencyHz: 1000,
-      isBypassed: false,
-      gainDb: 3,
-      q: 1.1,
-      slopeDbPerOct: 12,
-    }
-    const secondBand: EqBand = {
-      id: 'band-2',
-      type: 'highCut',
-      frequencyHz: 9000,
-      isBypassed: false,
-      slopeDbPerOct: 24,
-    }
-
-    syncMonitorGraph(context, graph, [firstBand], baselineCurve, false, false, -8)
-    const previousActiveBranch = graph.activeBranchKey
-    const previousActiveOutput =
-      previousActiveBranch === 'a' ? graph.branchA.output : graph.branchB.output
-
-    syncMonitorGraph(
-      context,
-      graph,
-      [firstBand, secondBand],
-      baselineCurve,
-      false,
-      false,
-      -8,
-    )
-
-    expect(graph.activeBranchKey).not.toBe(previousActiveBranch)
-    expect((previousActiveOutput.gain as unknown as FakeAudioParam).events.at(-1)).toEqual({
-      type: 'ramp',
-      time: 1 + GRAPH_CROSSFADE_MS / 1000,
-      value: 0,
-    })
-
-    vi.advanceTimersByTime(GRAPH_CROSSFADE_MS + 1)
-
-    const inactiveBranch =
-      graph.activeBranchKey === 'a' ? graph.branchB : graph.branchA
-    expect(inactiveBranch.filterNodes).toHaveLength(0)
-  })
-
-  it('disconnects the monitor graph cleanly', () => {
+  it('updates baseline monitor gains in place when the graph structure is unchanged', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
 
     syncMonitorGraph(context, graph, [], baselineCurve, false, true, -8)
+
+    const firstBaselineNode = graph.filterNodes[0] as unknown as FakeBiquadFilterNode
+    const updatedBaselineCurve: CurvePoint[] = [
+      { frequencyHz: 20, gainDb: -2 },
+      { frequencyHz: 1000, gainDb: 4 },
+      { frequencyHz: 20000, gainDb: 1 },
+    ]
+
+    syncMonitorGraph(context, graph, [], updatedBaselineCurve, false, true, -8)
+
+    expect(graph.filterNodes[0]).toBe(firstBaselineNode as unknown as BiquadFilterNode)
+    expect(firstBaselineNode.gain.events.at(-1)).toEqual({
+      type: 'ramp',
+      time: 1 + AUDIO_PARAM_RAMP_MS / 1000,
+      value: -2,
+    })
+  })
+
+  it('disconnects the monitor graph cleanly and idempotently', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+
+    syncMonitorGraph(context, graph, [], baselineCurve, false, true, -8)
+    disconnectMonitorGraph(graph)
     disconnectMonitorGraph(graph)
 
     expect(getConnections(graph.source)).toEqual([])
