@@ -750,6 +750,7 @@ function EditorShell() {
               <li>Band bypass affects the graph, export and monitor chain.</li>
               <li>Baseline monitor and Monitor bypass only affect playback.</li>
               <li>Drag any node to move it; bell uses the wheel for Q, while shelf and cut use the wheel for slope.</li>
+              <li>Bell Q controls width; higher bell slope makes the top or bottom flatter while the side walls get steeper.</li>
               <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
               <li>`Delete` / `Backspace`: remove the selected band.</li>
             </ul>

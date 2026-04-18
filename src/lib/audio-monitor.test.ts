@@ -303,6 +303,65 @@ describe('audio monitor graph', () => {
     )
   })
 
+  it('builds paired bell edge sections for steeper bell slopes', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 9,
+      q: 1,
+      slopeDbPerOct: 48,
+    }
+
+    syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
+
+    expect(graph.filterNodes).toHaveLength(8)
+    expect(graph.filterDescriptors[0]?.key).toBe('band-1:0')
+    expect(graph.filterDescriptors[7]?.key).toBe('band-1:7')
+    expect(
+      (graph.filterNodes[0] as unknown as FakeIIRFilterNode).feedforward,
+    ).not.toEqual(
+      (graph.filterNodes[7] as unknown as FakeIIRFilterNode).feedforward,
+    )
+  })
+
+  it('changes flat-top bell coefficients when q changes at a fixed slope', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 9,
+      q: 0.8,
+      slopeDbPerOct: 48,
+    }
+
+    syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
+    const initialFeedforward = [
+      ...(graph.filterNodes[0] as unknown as FakeIIRFilterNode).feedforward,
+    ]
+
+    syncMonitorGraph(
+      context,
+      graph,
+      [{ ...band, q: 2 }],
+      baselineCurve,
+      false,
+      false,
+      -8,
+    )
+
+    expect(graph.filterNodes).toHaveLength(8)
+    expect((graph.filterNodes[0] as unknown as FakeIIRFilterNode).feedforward).not.toEqual(
+      initialFeedforward,
+    )
+  })
+
   it('rebuilds the active chain when continuous band parameters change', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
