@@ -4,14 +4,33 @@ import {
   FFT_ANALYSER_MAX_DB,
   FFT_ANALYSER_MIN_DB,
   FFT_DISPLAY_GRID_SIZE,
-  createGraphEqNodes,
   createMonitorGraph,
   disconnectMonitorGraph,
   mapFrequencyDataToSpectrum,
   syncMonitorGraph,
   useEqPlaybackMonitor,
 } from './audio-monitor'
-import type { CurvePoint, EqBand } from '../types'
+import type { CurvePoint, CutBand, EqBand, PeakingBand } from '../types'
+
+class FakeAudioParam {
+  value: number
+
+  constructor(value = 0) {
+    this.value = value
+  }
+
+  cancelScheduledValues() {}
+
+  setValueAtTime(value: number) {
+    this.value = value
+    return this
+  }
+
+  linearRampToValueAtTime(value: number) {
+    this.value = value
+    return this
+  }
+}
 
 class FakeAudioNode {
   connections: FakeAudioNode[] = []
@@ -27,14 +46,18 @@ class FakeAudioNode {
 }
 
 class FakeGainNode extends FakeAudioNode {
-  gain = { value: 1 }
+  gain = new FakeAudioParam(1)
 }
 
-class FakeBiquadFilterNode extends FakeAudioNode {
-  type: BiquadFilterType = 'peaking'
-  frequency = { value: 1000 }
-  gain = { value: 0 }
-  Q = { value: 1 }
+class FakeIIRFilterNode extends FakeAudioNode {
+  feedforward: number[]
+  feedback: number[]
+
+  constructor(feedforward: number[], feedback: number[]) {
+    super()
+    this.feedforward = feedforward
+    this.feedback = feedback
+  }
 }
 
 class FakeAnalyserNode extends FakeAudioNode {
@@ -65,11 +88,13 @@ function getConnections(node: unknown) {
 }
 
 class FakeAudioContext {
+  currentTime = 0
   destination = new FakeAudioNode()
   sampleRate = 48_000
   gainNodes: FakeGainNode[] = []
   analyserNodes: FakeAnalyserNode[] = []
   mediaSources: FakeMediaElementSourceNode[] = []
+  iirFilters: FakeIIRFilterNode[] = []
 
   createGain() {
     const node = new FakeGainNode()
@@ -77,8 +102,10 @@ class FakeAudioContext {
     return node
   }
 
-  createBiquadFilter() {
-    return new FakeBiquadFilterNode()
+  createIIRFilter(feedforward: number[], feedback: number[]) {
+    const node = new FakeIIRFilterNode(feedforward, feedback)
+    this.iirFilters.push(node)
+    return node
   }
 
   createAnalyser() {
@@ -100,7 +127,7 @@ const baselineCurve: CurvePoint[] = [
   { frequencyHz: 20000, gainDb: -1 },
 ]
 
-let lastCreatedContext: FakeAudioContext | null = null
+let lastCreatedContext: HookFakeAudioContext | null = null
 
 class HookFakeAudioContext extends FakeAudioContext {
   constructor() {
@@ -133,27 +160,30 @@ describe('audio monitor graph', () => {
 
     expect(getConnections(graph.source)).toHaveLength(2)
     expect(getConnections(graph.dryGain)).toEqual([context.destination])
+    expect(getConnections(graph.wetInput)).toEqual([
+      graph.preGainNode as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(graph.preGainNode)).toEqual([
+      graph.preAnalyser as unknown as FakeAudioNode,
+      graph.activeLane.input as unknown as FakeAudioNode,
+      graph.stagingLane.input as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(graph.activeLane.output)).toEqual([
+      graph.wetGain as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(graph.stagingLane.output)).toEqual([
+      graph.wetGain as unknown as FakeAudioNode,
+    ])
     expect(getConnections(graph.wetGain)).toEqual([
       context.destination,
       graph.postAnalyser as unknown as FakeAudioNode,
     ])
-    expect(getConnections(graph.preGainNode)).toEqual([])
     expect(graph.preAnalyser.fftSize).toBe(8192)
     expect(graph.preAnalyser.minDecibels).toBe(FFT_ANALYSER_MIN_DB)
     expect(graph.postAnalyser.maxDecibels).toBe(FFT_ANALYSER_MAX_DB)
   })
 
-  it('builds a fixed graph EQ bank from the imported baseline curve', () => {
-    const context = new FakeAudioContext() as unknown as AudioContext
-    const nodes = createGraphEqNodes(context, baselineCurve)
-
-    expect(nodes).toHaveLength(31)
-    expect((nodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
-    expect((nodes[15] as unknown as FakeBiquadFilterNode).type).toBe('peaking')
-    expect((nodes[30] as unknown as FakeBiquadFilterNode).type).toBe('highshelf')
-  })
-
-  it('adds baseline graph EQ nodes ahead of active param bands when enabled', () => {
+  it('adds baseline sections ahead of active param sections when enabled', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const bands: EqBand[] = [
@@ -177,12 +207,15 @@ describe('audio monitor graph', () => {
 
     syncMonitorGraph(context, graph, bands, baselineCurve, false, true, -10)
 
+    expect(graph.filterDescriptors).toHaveLength(33)
+    expect(graph.filterDescriptors[0]?.key).toBe('baseline:0:0')
+    expect(graph.filterDescriptors[30]?.key).toBe('baseline:30:0')
+    expect(graph.filterDescriptors[31]?.key).toBe('band-2:0')
     expect(graph.filterNodes).toHaveLength(33)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
-    expect((graph.filterNodes[30] as unknown as FakeBiquadFilterNode).type).toBe('highshelf')
-    expect((graph.filterNodes[31] as unknown as FakeBiquadFilterNode).type).toBe('lowpass')
-    expect(getConnections(graph.preGainNode)).toEqual([
-      graph.preAnalyser as unknown as FakeAudioNode,
+    expect((graph.filterNodes[0] as unknown as FakeIIRFilterNode).feedforward).toHaveLength(
+      3,
+    )
+    expect(getConnections(graph.activeLane.input)).toEqual([
       graph.filterNodes[0] as unknown as FakeAudioNode,
     ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-10 / 20))
@@ -190,7 +223,7 @@ describe('audio monitor graph', () => {
     expect(graph.wetGain.gain.value).toBe(1)
   })
 
-  it('keeps pre-gain active and bypasses EQ filters when monitor bypass is enabled', () => {
+  it('keeps pre-gain active and bypasses EQ sections when monitor bypass is enabled', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const bands: EqBand[] = [
@@ -206,19 +239,15 @@ describe('audio monitor graph', () => {
     syncMonitorGraph(context, graph, bands, baselineCurve, true, false, -8)
 
     expect(graph.filterNodes).toHaveLength(0)
-    expect(getConnections(graph.wetInput)).toEqual([
-      graph.preGainNode as unknown as FakeAudioNode,
-    ])
-    expect(getConnections(graph.preGainNode)).toEqual([
-      graph.preAnalyser as unknown as FakeAudioNode,
-      graph.wetGain as unknown as FakeAudioNode,
+    expect(getConnections(graph.activeLane.input)).toEqual([
+      graph.activeLane.output as unknown as FakeAudioNode,
     ])
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
-    expect(graph.dryGain.gain.value).toBe(0)
-    expect(graph.wetGain.gain.value).toBe(1)
+    expect(graph.activeLane.output.gain.value).toBe(1)
+    expect(graph.stagingLane.output.gain.value).toBe(0)
   })
 
-  it('builds stacked filter stages for shelf slopes in the monitor chain', () => {
+  it('builds stacked IIR sections for shelf slopes in the monitor chain', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const bands: EqBand[] = [
@@ -236,32 +265,45 @@ describe('audio monitor graph', () => {
     syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8)
 
     expect(graph.filterNodes).toHaveLength(5)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBeCloseTo(1.2)
+    expect(graph.filterDescriptors.every((descriptor) => descriptor.key.startsWith('band-1:'))).toBe(
+      true,
+    )
   })
 
-  it('uses slope to narrow peaking bands in the monitor chain', () => {
+  it('changes shelf coefficients when q changes', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const band: EqBand = {
       id: 'band-1',
-      type: 'peaking',
-      frequencyHz: 1000,
+      type: 'highShelf',
+      frequencyHz: 4000,
       isBypassed: false,
       gainDb: 6,
-      q: 1.5,
-      slopeDbPerOct: 24,
+      q: 0.7,
+      slopeDbPerOct: 18,
     }
 
     syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
+    const initialFeedforward = [
+      ...(graph.filterNodes[0] as unknown as FakeIIRFilterNode).feedforward,
+    ]
 
-    expect(graph.filterNodes).toHaveLength(4)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('peaking')
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBeCloseTo(1.5)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(3)
+    syncMonitorGraph(
+      context,
+      graph,
+      [{ ...band, q: 1.6 }],
+      baselineCurve,
+      false,
+      false,
+      -8,
+    )
+
+    expect((graph.filterNodes[0] as unknown as FakeIIRFilterNode).feedforward).not.toEqual(
+      initialFeedforward,
+    )
   })
 
-  it('reuses filter nodes when only continuous band parameters change', () => {
+  it('rebuilds the active chain when continuous band parameters change', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const initialBands: EqBand[] = [
@@ -279,8 +321,8 @@ describe('audio monitor graph', () => {
     syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
 
     const initialNode = graph.filterNodes[0]
-
-    const updatedBand: EqBand = {
+    const initialActiveInputConnections = getConnections(graph.activeLane.input)
+    const updatedBand: PeakingBand = {
       id: 'band-1',
       type: 'peaking',
       frequencyHz: 1600,
@@ -290,18 +332,24 @@ describe('audio monitor graph', () => {
       slopeDbPerOct: 12,
     }
 
-    syncMonitorGraph(context, graph, [updatedBand], baselineCurve, false, false, -6)
-
-    expect(graph.filterNodes[0]).toBe(initialNode)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).frequency.value).toBe(1600)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBe(3)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(
-      1.8 * Math.sqrt(2),
+    syncMonitorGraph(
+      context,
+      graph,
+      [updatedBand],
+      baselineCurve,
+      false,
+      false,
+      -6,
     )
+
+    expect(graph.filterNodes[0]).not.toBe(initialNode)
+    expect(getConnections(graph.activeLane.input)).not.toBe(initialActiveInputConnections)
+    expect(graph.activeLane.output.gain.value).toBe(1)
+    expect(graph.stagingLane.output.gain.value).toBe(0)
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-6 / 20))
   })
 
-  it('rebuilds filter nodes when the filter topology changes', () => {
+  it('rebuilds the active chain when topology changes', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const initialBands: EqBand[] = [
@@ -316,12 +364,19 @@ describe('audio monitor graph', () => {
 
     syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
 
-    const initialNodes = [...graph.filterNodes]
+    const initialNode = graph.filterNodes[0]
+    const updatedBand: CutBand = {
+      id: 'band-1',
+      type: 'lowCut',
+      frequencyHz: 120,
+      isBypassed: false,
+      slopeDbPerOct: 48,
+    }
 
     syncMonitorGraph(
       context,
       graph,
-      [{ ...initialBands[0], slopeDbPerOct: 48 }],
+      [updatedBand],
       baselineCurve,
       false,
       false,
@@ -329,43 +384,7 @@ describe('audio monitor graph', () => {
     )
 
     expect(graph.filterNodes).toHaveLength(4)
-    expect(graph.filterNodes[0]).not.toBe(initialNodes[0])
-  })
-
-  it('rebuilds peaking filter topology when slope changes', () => {
-    const context = new FakeAudioContext() as unknown as AudioContext
-    const graph = createMonitorGraph(context, document.createElement('audio'))
-    const initialBands: EqBand[] = [
-      {
-        id: 'band-1',
-        type: 'peaking',
-        frequencyHz: 1000,
-        isBypassed: false,
-        gainDb: 6,
-        q: 1.25,
-        slopeDbPerOct: 12,
-      },
-    ]
-
-    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
-
-    const initialNode = graph.filterNodes[0]
-
-    syncMonitorGraph(
-      context,
-      graph,
-      [{ ...initialBands[0], slopeDbPerOct: 36 }],
-      baselineCurve,
-      false,
-      false,
-      -8,
-    )
-
-    expect(graph.filterNodes).toHaveLength(6)
     expect(graph.filterNodes[0]).not.toBe(initialNode)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(
-      1.25 * Math.sqrt(6),
-    )
   })
 
   it('disconnects the monitor graph cleanly', () => {
@@ -380,6 +399,8 @@ describe('audio monitor graph', () => {
     expect(getConnections(graph.wetInput)).toEqual([])
     expect(getConnections(graph.preGainNode)).toEqual([])
     expect(getConnections(graph.wetGain)).toEqual([])
+    expect(getConnections(graph.activeLane.input)).toEqual([])
+    expect(getConnections(graph.activeLane.output)).toEqual([])
   })
 
   it('synchronizes the monitor graph immediately when an audio element is attached', () => {
@@ -410,13 +431,18 @@ describe('audio monitor graph', () => {
     const context = lastCreatedContext as HookFakeAudioContext
     const wetInput = context.gainNodes[1]
     const preGainNode = context.gainNodes[2]
-    const wetGain = context.gainNodes[3]
+    const activeLaneInput = context.gainNodes[4]
+    const activeLaneOutput = context.gainNodes[5]
     const preAnalyser = context.analyserNodes[0]
 
     expect(getConnections(wetInput)).toEqual([preGainNode])
     expect(getConnections(preGainNode)).toEqual([
       preAnalyser as unknown as FakeAudioNode,
-      wetGain as unknown as FakeAudioNode,
+      activeLaneInput as unknown as FakeAudioNode,
+      context.gainNodes[6] as unknown as FakeAudioNode,
+    ])
+    expect(getConnections(activeLaneInput)).toEqual([
+      activeLaneOutput as unknown as FakeAudioNode,
     ])
   })
 
