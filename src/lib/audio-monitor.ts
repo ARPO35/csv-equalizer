@@ -14,7 +14,7 @@ export const FFT_ANALYSER_MIN_DB = -96
 export const FFT_ANALYSER_MAX_DB = 0
 const FFT_ANALYSER_SIZE = 8192
 const FFT_ANALYSER_SMOOTHING = 0.82
-const FFT_OVERLAY_GRID_SIZE = 1024
+export const FFT_DISPLAY_GRID_SIZE = 512
 const GRAPH_EQ_CENTERS = [
   20,
   25,
@@ -48,7 +48,7 @@ const GRAPH_EQ_CENTERS = [
   16000,
   20000,
 ]
-const FFT_OVERLAY_FREQUENCIES = createLogFrequencyGrid(FFT_OVERLAY_GRID_SIZE)
+const FFT_OVERLAY_FREQUENCIES = createLogFrequencyGrid(FFT_DISPLAY_GRID_SIZE)
 
 type AudioContextConstructor = new () => AudioContext
 

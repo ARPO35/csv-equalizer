@@ -384,6 +384,39 @@ describe('EqChart', () => {
     expect(screen.getAllByTestId('fft-post-segment').length).toBeGreaterThanOrEqual(2)
   })
 
+  it('keeps the FFT overlay mounted while a node is being dragged', () => {
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    renderChart({
+      bands: [band],
+      fftOverlay,
+      selectedBandId: band.id,
+      showFlatHint: false,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    fireEvent.pointerMove(node, {
+      pointerId: 1,
+      clientX: 640,
+      clientY: 320,
+    })
+
+    expect(screen.getByTestId('fft-pre-line')).toBeTruthy()
+  })
+
   it('applies +3 dB per octave display compensation around 1 kHz', () => {
     expect(getSpectrumDisplayLevelDb(-30, 1000)).toBe(-30)
     expect(getSpectrumDisplayLevelDb(-30, 2000)).toBeCloseTo(-27)
@@ -395,12 +428,12 @@ describe('EqChart', () => {
     expect(getSpectrumDisplayLevelDb(-30, 2000, 30)).toBeCloseTo(3)
   })
 
-  it('renders the FFT pre-line as a smoothed sampled path', () => {
+  it('renders the FFT pre-line directly from the sampled overlay points', () => {
     renderChart({ fftOverlay, showFlatHint: false })
 
     const path = screen.getByTestId('fft-pre-line')
     const commands = path.getAttribute('d')?.match(/[ML]/g) ?? []
-    expect(commands.length).toBeGreaterThan(3)
+    expect(commands.length).toBe(3)
   })
 
   it('hides yellow FFT segments when post and pre responses are nearly identical', () => {

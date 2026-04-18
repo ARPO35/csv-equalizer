@@ -4,6 +4,8 @@ import {
   type MouseEvent,
   type PointerEvent,
   type WheelEvent,
+  memo,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -40,7 +42,6 @@ const FFT_FADE_CEIL_DB = 6
 const FFT_DISPLAY_REFERENCE_FREQUENCY = 1_000
 const FFT_DISPLAY_SLOPE_COMPENSATION_DB_PER_OCT = 3
 const FFT_DISPLAY_GAMMA = 0.35
-const SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT = 2
 
 type EditableField = 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct'
 
@@ -75,71 +76,6 @@ function createPath(points: CurvePoint[], minDb: number, maxDb: number) {
       return `${command}${getX(point.frequencyHz)},${getY(point.gainDb, minDb, maxDb)}`
     })
     .join(' ')
-}
-
-function interpolateCatmullRom(
-  previousValue: number,
-  startValue: number,
-  endValue: number,
-  nextValue: number,
-  t: number,
-) {
-  const tSquared = t * t
-  const tCubed = tSquared * t
-
-  return (
-    0.5 *
-    ((2 * startValue) +
-      (-previousValue + endValue) * t +
-      (2 * previousValue - 5 * startValue + 4 * endValue - nextValue) *
-        tSquared +
-      (-previousValue + 3 * startValue - 3 * endValue + nextValue) * tCubed)
-  )
-}
-
-function createSmoothedSpectrumPoints(points: SpectrumPoint[]) {
-  if (points.length <= 1) {
-    return points
-  }
-
-  const smoothedPoints: SpectrumPoint[] = [points[0]]
-
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previousPoint = points[Math.max(0, index - 1)]
-    const startPoint = points[index]
-    const endPoint = points[index + 1]
-    const nextPoint = points[Math.min(points.length - 1, index + 2)]
-
-    for (
-      let step = 1;
-      step <= SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT;
-      step += 1
-    ) {
-      const t = step / SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT
-      smoothedPoints.push({
-        frequencyHz: clampValue(
-          interpolateCatmullRom(
-            previousPoint.frequencyHz,
-            startPoint.frequencyHz,
-            endPoint.frequencyHz,
-            nextPoint.frequencyHz,
-            t,
-          ),
-          startPoint.frequencyHz,
-          endPoint.frequencyHz,
-        ),
-        levelDb: interpolateCatmullRom(
-          previousPoint.levelDb,
-          startPoint.levelDb,
-          endPoint.levelDb,
-          nextPoint.levelDb,
-          t,
-        ),
-      })
-    }
-  }
-
-  return smoothedPoints
 }
 
 function createSpectrumLinePath(points: SpectrumPoint[], visualGainDb: number) {
@@ -376,6 +312,66 @@ function commitBand(
   onBandCommit(band, mode)
 }
 
+const FftOverlayLayer = memo(function FftOverlayLayer({
+  fftOverlay,
+  visualGainDb,
+  isDragging,
+}: {
+  fftOverlay?: FftOverlay | null
+  visualGainDb: number
+  isDragging: boolean
+}) {
+  const deferredOverlay = useDeferredValue(fftOverlay)
+  const activeOverlay = isDragging
+    ? (deferredOverlay ?? fftOverlay)
+    : fftOverlay
+  const preSpectrum = activeOverlay?.preSpectrum ?? []
+  const postSpectrum = activeOverlay?.postSpectrum ?? []
+  const fftPreLinePath = useMemo(
+    () => createSpectrumLinePath(preSpectrum, visualGainDb),
+    [preSpectrum, visualGainDb],
+  )
+  const fftPreFillPath = useMemo(
+    () => createSpectrumFillPath(preSpectrum, visualGainDb),
+    [preSpectrum, visualGainDb],
+  )
+  const fftPostSegments = useMemo(
+    () => createSpectrumSegments(preSpectrum, postSpectrum, visualGainDb),
+    [postSpectrum, preSpectrum, visualGainDb],
+  )
+
+  if (!activeOverlay) {
+    return null
+  }
+
+  return (
+    <g aria-hidden="true">
+      <path
+        data-testid="fft-pre-fill"
+        className="fft-overlay-fill"
+        d={fftPreFillPath}
+      />
+      <path
+        data-testid="fft-pre-line"
+        className="curve curve-fft-pre-line"
+        d={fftPreLinePath}
+      />
+      {fftPostSegments.map((segment) => (
+        <line
+          key={segment.id}
+          data-testid="fft-post-segment"
+          className="curve-fft-post-segment"
+          x1={segment.x1}
+          y1={segment.y1}
+          x2={segment.x2}
+          y2={segment.y2}
+          strokeOpacity={segment.opacity}
+        />
+      ))}
+    </g>
+  )
+})
+
 export function EqChart({
   baselineCurve,
   bandCurve,
@@ -429,31 +425,6 @@ export function EqChart({
     () => createYAxisTicks(viewMinDb, viewMaxDb),
     [viewMaxDb, viewMinDb],
   )
-  const smoothedPreSpectrum = useMemo(
-    () => createSmoothedSpectrumPoints(fftOverlay?.preSpectrum ?? []),
-    [fftOverlay],
-  )
-  const smoothedPostSpectrum = useMemo(
-    () => createSmoothedSpectrumPoints(fftOverlay?.postSpectrum ?? []),
-    [fftOverlay],
-  )
-  const fftPreLinePath = useMemo(
-    () => createSpectrumLinePath(smoothedPreSpectrum, visualGainDb),
-    [smoothedPreSpectrum, visualGainDb],
-  )
-  const fftPreFillPath = useMemo(
-    () => createSpectrumFillPath(smoothedPreSpectrum, visualGainDb),
-    [smoothedPreSpectrum, visualGainDb],
-  )
-  const fftPostSegments = useMemo(
-    () =>
-      createSpectrumSegments(
-        smoothedPreSpectrum,
-        smoothedPostSpectrum,
-        visualGainDb,
-      ),
-    [smoothedPostSpectrum, smoothedPreSpectrum, visualGainDb],
-  )
   const popupBandId = draggingBandId ?? hoveredBandId ?? pinnedBandId
   const popupBand = useMemo(
     () => bands.find((band) => band.id === popupBandId),
@@ -463,7 +434,7 @@ export function EqChart({
     () => bands.find((band) => band.id === draggingBandId),
     [bands, draggingBandId],
   )
-
+  const isDragging = draggingBandId !== null
 
   useEffect(() => () => {
     if (hoverCloseTimerRef.current !== null) {
@@ -772,32 +743,11 @@ export function EqChart({
         <path className="curve curve-source" d={createPath(baselineCurve, viewMinDb, viewMaxDb)} />
         <path className="curve curve-eq" d={createPath(bandCurve, viewMinDb, viewMaxDb)} />
         <path className="curve curve-preview" d={createPath(outputCurve, viewMinDb, viewMaxDb)} />
-        {fftOverlay ? (
-          <g aria-hidden="true">
-            <path
-              data-testid="fft-pre-fill"
-              className="fft-overlay-fill"
-              d={fftPreFillPath}
-            />
-            <path
-              data-testid="fft-pre-line"
-              className="curve curve-fft-pre-line"
-              d={fftPreLinePath}
-            />
-            {fftPostSegments.map((segment) => (
-              <line
-                key={segment.id}
-                data-testid="fft-post-segment"
-                className="curve-fft-post-segment"
-                x1={segment.x1}
-                y1={segment.y1}
-                x2={segment.x2}
-                y2={segment.y2}
-                strokeOpacity={segment.opacity}
-              />
-            ))}
-          </g>
-        ) : null}
+        <FftOverlayLayer
+          fftOverlay={fftOverlay}
+          visualGainDb={visualGainDb}
+          isDragging={isDragging}
+        />
 
         {bands.map((band) => (
           <g key={band.id}>

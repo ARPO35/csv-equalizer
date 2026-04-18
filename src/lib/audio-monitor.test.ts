@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FFT_ANALYSER_MAX_DB,
   FFT_ANALYSER_MIN_DB,
+  FFT_DISPLAY_GRID_SIZE,
   createGraphEqNodes,
   createMonitorGraph,
   disconnectMonitorGraph,
@@ -385,5 +386,11 @@ describe('audio monitor graph', () => {
 
     expect(spectrum[0]).toEqual({ frequencyHz: 6_000, levelDb: -18 })
     expect(spectrum[1]).toEqual({ frequencyHz: 12_000, levelDb: -90 })
+  })
+
+  it('uses the reduced display grid size for default FFT overlays', () => {
+    const spectrum = mapFrequencyDataToSpectrum(Float32Array.from([]), 24_000)
+
+    expect(spectrum).toHaveLength(FFT_DISPLAY_GRID_SIZE)
   })
 })
