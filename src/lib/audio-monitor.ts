@@ -6,9 +6,9 @@ import {
   useState,
 } from 'react'
 import { createLogFrequencyGrid } from './curve'
+import { CUT_STAGE_Q, getBandStageProfile } from './filter-stages'
 import type { CurvePoint, EqBand, FftOverlay, SpectrumPoint } from '../types'
 
-const CUT_Q = Math.SQRT1_2
 const GRAPH_EQ_Q = 4.318
 export const FFT_ANALYSER_MIN_DB = -96
 export const FFT_ANALYSER_MAX_DB = 0
@@ -228,11 +228,7 @@ function createBaselineDescriptors(baselineCurve: CurvePoint[]): FilterDescripto
 }
 
 function createBandDescriptors(band: EqBand): FilterDescriptor[] {
-  const stageCount =
-    band.type === 'lowCut' || band.type === 'highCut'
-      ? band.slopeDbPerOct / 12
-      : band.slopeDbPerOct / 6
-  const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
+  const { stageCount, stageGainDb, stageQ } = getBandStageProfile(band)
 
   return Array.from({ length: stageCount }, (_, index) => {
     if (band.type === 'peaking') {
@@ -241,7 +237,7 @@ function createBandDescriptors(band: EqBand): FilterDescriptor[] {
         type: 'peaking',
         frequencyHz: band.frequencyHz,
         gainDb: stageGainDb ?? band.gainDb,
-        q: band.q,
+        q: stageQ ?? band.q,
       } satisfies FilterDescriptor
     }
 
@@ -258,7 +254,7 @@ function createBandDescriptors(band: EqBand): FilterDescriptor[] {
       key: `${band.id}:${index}`,
       type: band.type === 'lowCut' ? 'highpass' : 'lowpass',
       frequencyHz: band.frequencyHz,
-      q: CUT_Q,
+      q: stageQ ?? CUT_STAGE_Q,
     } satisfies FilterDescriptor
   })
 }

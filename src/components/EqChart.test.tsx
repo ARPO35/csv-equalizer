@@ -142,6 +142,39 @@ describe('EqChart', () => {
     }, 'immediate')
   })
 
+  it('allows double-click editing of peaking slope values', async () => {
+    const user = userEvent.setup()
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const chart = within(container)
+    await user.click(chart.getByLabelText('Bell band'))
+    await user.dblClick(chart.getByLabelText('Edit slope'))
+    const input = chart.getByLabelText('Slope')
+    await user.clear(input)
+    await user.type(input, '24{Enter}')
+
+    expect(onBandCommit).toHaveBeenLastCalledWith({
+      ...band,
+      slopeDbPerOct: 24,
+    }, 'immediate')
+  })
+
   it('adjusts Q with the mouse wheel while dragging a peaking band', () => {
     const onBandCommit = vi.fn()
     const band: EqBand = {

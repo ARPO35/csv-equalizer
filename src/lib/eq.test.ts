@@ -15,7 +15,8 @@ class FakeBiquadFilter {
   ) {
     frequencies.forEach((frequency, index) => {
       const ratio = Math.log2(Math.max(frequency, 1) / this.frequency.value)
-      const gaussian = Math.exp(-(ratio ** 2) / Math.max(this.Q.value, 0.1))
+      const gaussian = Math.exp(-(ratio ** 2) * Math.max(this.Q.value, 0.1))
+      const shelfBlend = 1 / (1 + 10 ** (ratio * 3))
       let linearGain = 1
 
       switch (this.type) {
@@ -23,10 +24,12 @@ class FakeBiquadFilter {
           linearGain = 10 ** ((this.gain.value * gaussian) / 20)
           break
         case 'lowshelf':
-          linearGain = frequency <= this.frequency.value ? 10 ** (this.gain.value / 20) : 1
+          linearGain =
+            1 + (10 ** (this.gain.value / 20) - 1) * shelfBlend
           break
         case 'highshelf':
-          linearGain = frequency >= this.frequency.value ? 10 ** (this.gain.value / 20) : 1
+          linearGain =
+            1 + (10 ** (this.gain.value / 20) - 1) * (1 - shelfBlend)
           break
         case 'highpass':
           linearGain = Math.min(1, frequency / this.frequency.value)
@@ -85,6 +88,70 @@ describe('computeEqCurve', () => {
     const curve = computeEqCurve(bands, [100, 1000, 10000])
     expect(curve[1].gainDb).toBeGreaterThan(curve[0].gainDb)
     expect(curve[1].gainDb).toBeGreaterThan(curve[2].gainDb)
+  })
+
+  it('makes steeper peaking slopes narrower at the same Q and gain', () => {
+    const gentle: EqBand[] = [
+      {
+        id: 'peak-12',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        q: 1,
+        slopeDbPerOct: 12,
+      },
+    ]
+    const steep: EqBand[] = [
+      {
+        id: 'peak-48',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        q: 1,
+        slopeDbPerOct: 48,
+      },
+    ]
+
+    const sampleFrequencies = [500, 1000, 2000]
+    const gentleCurve = computeEqCurve(gentle, sampleFrequencies)
+    const steepCurve = computeEqCurve(steep, sampleFrequencies)
+
+    expect(steepCurve[1].gainDb).toBeCloseTo(gentleCurve[1].gainDb, 4)
+    expect(steepCurve[0].gainDb).toBeLessThan(gentleCurve[0].gainDb)
+    expect(steepCurve[2].gainDb).toBeLessThan(gentleCurve[2].gainDb)
+  })
+
+  it('makes steeper shelf slopes transition more sharply', () => {
+    const gentle: EqBand[] = [
+      {
+        id: 'shelf-12',
+        type: 'lowShelf',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        slopeDbPerOct: 12,
+      },
+    ]
+    const steep: EqBand[] = [
+      {
+        id: 'shelf-48',
+        type: 'lowShelf',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        slopeDbPerOct: 48,
+      },
+    ]
+
+    const sampleFrequencies = [100, 1000, 2000]
+    const gentleCurve = computeEqCurve(gentle, sampleFrequencies)
+    const steepCurve = computeEqCurve(steep, sampleFrequencies)
+
+    expect(steepCurve[0].gainDb).toBeCloseTo(gentleCurve[0].gainDb, 4)
+    expect(steepCurve[1].gainDb).toBeLessThan(gentleCurve[1].gainDb)
+    expect(steepCurve[2].gainDb).toBeLessThan(gentleCurve[2].gainDb)
   })
 
   it('makes steeper cut slopes more attenuated', () => {

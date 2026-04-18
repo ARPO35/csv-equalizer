@@ -1,8 +1,8 @@
 import { sumCurves } from './curve'
+import { CUT_STAGE_Q, getBandStageProfile } from './filter-stages'
 import type { CurvePoint, EqBand } from '../types'
 
 const MAGNITUDE_FLOOR = 1e-8
-const CUT_Q = Math.SQRT1_2
 
 let cachedAudioContext: AudioContext | null = null
 
@@ -38,6 +38,7 @@ function createSingleFilterResponse(
   band: EqBand,
   frequencies: number[],
   gainDbOverride?: number,
+  qOverride?: number,
 ): CurvePoint[] {
   const context = getAudioContext()
   const filter = context.createBiquadFilter()
@@ -46,13 +47,13 @@ function createSingleFilterResponse(
   if (band.type === 'peaking') {
     filter.type = 'peaking'
     filter.gain.value = gainDbOverride ?? band.gainDb
-    filter.Q.value = band.q
+    filter.Q.value = qOverride ?? band.q
   } else if (band.type === 'lowShelf' || band.type === 'highShelf') {
     filter.type = band.type === 'lowShelf' ? 'lowshelf' : 'highshelf'
     filter.gain.value = gainDbOverride ?? band.gainDb
   } else {
     filter.type = band.type === 'lowCut' ? 'highpass' : 'lowpass'
-    filter.Q.value = CUT_Q
+    filter.Q.value = qOverride ?? CUT_STAGE_Q
   }
 
   const frequencyArray = Float32Array.from(frequencies)
@@ -63,19 +64,11 @@ function createSingleFilterResponse(
   return magnitudesToDbResponse(frequencies, magnitudes)
 }
 
-function getStageCount(band: EqBand) {
-  if (band.type === 'lowCut' || band.type === 'highCut') {
-    return band.slopeDbPerOct / 12
-  }
-  return band.slopeDbPerOct / 6
-}
-
 function computeStageResponse(
   band: EqBand,
   frequencies: number[],
 ): CurvePoint[] {
-  const stageCount = getStageCount(band)
-  const stageGainDb = 'gainDb' in band ? band.gainDb / stageCount : undefined
+  const { stageCount, stageGainDb, stageQ } = getBandStageProfile(band)
 
   return Array.from({ length: stageCount }).reduce<CurvePoint[] | null>(
     (sumCurve) => {
@@ -83,6 +76,7 @@ function computeStageResponse(
         band,
         frequencies,
         stageGainDb,
+        stageQ,
       )
       if (!sumCurve) {
         return stageCurve
