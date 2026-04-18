@@ -1,68 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { computeEqCurve } from './eq'
 import type { EqBand } from '../types'
 
-class FakeBiquadFilter {
-  type: BiquadFilterType = 'peaking'
-  frequency = { value: 1000 }
-  gain = { value: 0 }
-  Q = { value: 1 }
-
-  getFrequencyResponse(
-    frequencies: Float32Array,
-    magnitudes: Float32Array,
-    phases: Float32Array,
-  ) {
-    frequencies.forEach((frequency, index) => {
-      const ratio = Math.log2(Math.max(frequency, 1) / this.frequency.value)
-      const gaussian = Math.exp(-(ratio ** 2) * Math.max(this.Q.value, 0.1))
-      const shelfBlend = 1 / (1 + 10 ** (ratio * 3))
-      let linearGain = 1
-
-      switch (this.type) {
-        case 'peaking':
-          linearGain = 10 ** ((this.gain.value * gaussian) / 20)
-          break
-        case 'lowshelf':
-          linearGain =
-            1 + (10 ** (this.gain.value / 20) - 1) * shelfBlend
-          break
-        case 'highshelf':
-          linearGain =
-            1 + (10 ** (this.gain.value / 20) - 1) * (1 - shelfBlend)
-          break
-        case 'highpass':
-          linearGain = Math.min(1, frequency / this.frequency.value)
-          break
-        case 'lowpass':
-          linearGain = Math.min(1, this.frequency.value / Math.max(frequency, 1))
-          break
-        default:
-          linearGain = 1
-      }
-
-      magnitudes[index] = linearGain
-      phases[index] = 0
-    })
-  }
-}
-
-class FakeAudioContext {
-  createBiquadFilter() {
-    return new FakeBiquadFilter()
-  }
-}
-
 describe('computeEqCurve', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
-    Object.defineProperty(window, 'AudioContext', {
-      configurable: true,
-      writable: true,
-      value: FakeAudioContext,
-    })
-  })
-
   it('returns a flat zero curve when no bands exist', () => {
     const curve = computeEqCurve([], [20, 1000, 20000])
     expect(curve).toEqual([
@@ -121,6 +61,39 @@ describe('computeEqCurve', () => {
     expect(steepCurve[1].gainDb).toBeCloseTo(gentleCurve[1].gainDb, 4)
     expect(steepCurve[0].gainDb).toBeLessThan(gentleCurve[0].gainDb)
     expect(steepCurve[2].gainDb).toBeLessThan(gentleCurve[2].gainDb)
+  })
+
+  it('keeps peaking Q as the primary bandwidth control', () => {
+    const narrow: EqBand[] = [
+      {
+        id: 'peak-q-high',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        q: 4,
+        slopeDbPerOct: 12,
+      },
+    ]
+    const wide: EqBand[] = [
+      {
+        id: 'peak-q-low',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        q: 0.5,
+        slopeDbPerOct: 12,
+      },
+    ]
+
+    const sampleFrequencies = [500, 1000, 2000]
+    const narrowCurve = computeEqCurve(narrow, sampleFrequencies)
+    const wideCurve = computeEqCurve(wide, sampleFrequencies)
+
+    expect(narrowCurve[1].gainDb).toBeCloseTo(wideCurve[1].gainDb, 4)
+    expect(narrowCurve[0].gainDb).toBeLessThan(wideCurve[0].gainDb)
+    expect(narrowCurve[2].gainDb).toBeLessThan(wideCurve[2].gainDb)
   })
 
   it('makes steeper shelf slopes transition more sharply', () => {

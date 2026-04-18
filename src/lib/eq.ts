@@ -1,32 +1,16 @@
+import {
+  DEFAULT_RESPONSE_SAMPLE_RATE,
+  designBandSections,
+  getCascadeMagnitudeResponse,
+} from './filter-coefficients'
 import { sumCurves } from './curve'
-import { CUT_STAGE_Q, getBandStageProfile } from './filter-stages'
 import type { CurvePoint, EqBand } from '../types'
 
 const MAGNITUDE_FLOOR = 1e-8
 
-let cachedAudioContext: AudioContext | null = null
-
-function getAudioContext() {
-  if (cachedAudioContext) {
-    return cachedAudioContext
-  }
-
-  const ContextConstructor =
-    window.AudioContext ??
-    (window as Window & { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext
-
-  if (!ContextConstructor) {
-    throw new Error('This browser does not support Web Audio filter analysis.')
-  }
-
-  cachedAudioContext = new ContextConstructor()
-  return cachedAudioContext
-}
-
 function magnitudesToDbResponse(
   frequencies: number[],
-  magnitudes: Float32Array,
+  magnitudes: number[],
 ): CurvePoint[] {
   return frequencies.map((frequencyHz, index) => ({
     frequencyHz,
@@ -34,61 +18,19 @@ function magnitudesToDbResponse(
   }))
 }
 
-function createSingleFilterResponse(
-  band: EqBand,
-  frequencies: number[],
-  gainDbOverride?: number,
-  qOverride?: number,
-): CurvePoint[] {
-  const context = getAudioContext()
-  const filter = context.createBiquadFilter()
-  filter.frequency.value = band.frequencyHz
-
-  if (band.type === 'peaking') {
-    filter.type = 'peaking'
-    filter.gain.value = gainDbOverride ?? band.gainDb
-    filter.Q.value = qOverride ?? band.q
-  } else if (band.type === 'lowShelf' || band.type === 'highShelf') {
-    filter.type = band.type === 'lowShelf' ? 'lowshelf' : 'highshelf'
-    filter.gain.value = gainDbOverride ?? band.gainDb
-  } else {
-    filter.type = band.type === 'lowCut' ? 'highpass' : 'lowpass'
-    filter.Q.value = qOverride ?? CUT_STAGE_Q
-  }
-
-  const frequencyArray = Float32Array.from(frequencies)
-  const magnitudes = new Float32Array(frequencies.length)
-  const phases = new Float32Array(frequencies.length)
-  filter.getFrequencyResponse(frequencyArray, magnitudes, phases)
-
-  return magnitudesToDbResponse(frequencies, magnitudes)
-}
-
 function computeStageResponse(
   band: EqBand,
   frequencies: number[],
 ): CurvePoint[] {
-  const { stageCount, stageGainDb, stageQ } = getBandStageProfile(band)
-
-  return Array.from({ length: stageCount }).reduce<CurvePoint[] | null>(
-    (sumCurve) => {
-      const stageCurve = createSingleFilterResponse(
-        band,
-        frequencies,
-        stageGainDb,
-        stageQ,
-      )
-      if (!sumCurve) {
-        return stageCurve
-      }
-
-      return sumCurve.map((point, index) => ({
-        frequencyHz: point.frequencyHz,
-        gainDb: point.gainDb + stageCurve[index].gainDb,
-      }))
-    },
-    null,
-  ) ?? []
+  const sections = designBandSections(band, DEFAULT_RESPONSE_SAMPLE_RATE)
+  const magnitudes = frequencies.map((frequencyHz) =>
+    getCascadeMagnitudeResponse(
+      sections,
+      frequencyHz,
+      DEFAULT_RESPONSE_SAMPLE_RATE,
+    ),
+  )
+  return magnitudesToDbResponse(frequencies, magnitudes)
 }
 
 function computeBandResponse(band: EqBand, frequencies: number[]) {
