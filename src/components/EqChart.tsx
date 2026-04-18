@@ -435,12 +435,111 @@ export function EqChart({
     [bands, draggingBandId],
   )
   const isDragging = draggingBandId !== null
+  const draggingBandRef = useRef<EqBand | undefined>(draggingBand)
+
+  draggingBandRef.current = draggingBand
 
   useEffect(() => () => {
     if (hoverCloseTimerRef.current !== null) {
       window.clearTimeout(hoverCloseTimerRef.current)
     }
   }, [])
+
+  function applyDragWheelDelta(deltaY: number) {
+    const activeDraggingBand = draggingBandRef.current
+    if (!activeDraggingBand || deltaY === 0) {
+      return
+    }
+
+    const direction = deltaY < 0 ? 1 : -1
+
+    if (activeDraggingBand.type === 'peaking') {
+      commitBand(
+        onBandCommit,
+        {
+          ...activeDraggingBand,
+          q: roundQ(clampQ(activeDraggingBand.q + direction * WHEEL_Q_STEP)),
+        },
+        'immediate',
+      )
+      return
+    }
+
+    if (
+      activeDraggingBand.type === 'lowCut' ||
+      activeDraggingBand.type === 'highCut'
+    ) {
+      const nextSlope = getNextSlope(
+        activeDraggingBand.slopeDbPerOct,
+        direction,
+        CUT_SLOPE_VALUES,
+      )
+
+      if (nextSlope === activeDraggingBand.slopeDbPerOct) {
+        return
+      }
+
+      commitBand(
+        onBandCommit,
+        {
+          ...activeDraggingBand,
+          slopeDbPerOct: nextSlope,
+        },
+        'immediate',
+      )
+      return
+    }
+
+    if (
+      activeDraggingBand.type !== 'lowShelf' &&
+      activeDraggingBand.type !== 'highShelf'
+    ) {
+      return
+    }
+
+    const nextSlope = getNextSlope(
+      activeDraggingBand.slopeDbPerOct,
+      direction,
+      MUSICAL_SLOPE_VALUES,
+    )
+
+    if (nextSlope === activeDraggingBand.slopeDbPerOct) {
+      return
+    }
+
+    commitBand(
+      onBandCommit,
+      {
+        ...activeDraggingBand,
+        slopeDbPerOct: nextSlope,
+      },
+      'immediate',
+    )
+  }
+
+  useEffect(() => {
+    if (!isDragging) {
+      return
+    }
+
+    function handleGlobalWheel(event: globalThis.WheelEvent) {
+      if (!draggingBandRef.current || event.deltaY === 0) {
+        return
+      }
+
+      event.preventDefault()
+      applyDragWheelDelta(event.deltaY)
+    }
+
+    window.addEventListener('wheel', handleGlobalWheel, {
+      capture: true,
+      passive: false,
+    })
+
+    return () => {
+      window.removeEventListener('wheel', handleGlobalWheel, true)
+    }
+  }, [isDragging, onBandCommit])
 
   function clearHoverTimer() {
     if (hoverCloseTimerRef.current !== null) {
@@ -532,64 +631,7 @@ export function EqChart({
     }
 
     event.preventDefault()
-    const direction = event.deltaY < 0 ? 1 : -1
-
-    if (draggingBand.type === 'peaking') {
-      commitBand(
-        onBandCommit,
-        {
-          ...draggingBand,
-          q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
-        },
-        'immediate',
-      )
-      return
-    }
-
-    if (draggingBand.type === 'lowCut' || draggingBand.type === 'highCut') {
-      const nextSlope = getNextSlope(
-        draggingBand.slopeDbPerOct,
-        direction,
-        CUT_SLOPE_VALUES,
-      )
-
-      if (nextSlope === draggingBand.slopeDbPerOct) {
-        return
-      }
-
-      commitBand(
-        onBandCommit,
-        {
-          ...draggingBand,
-          slopeDbPerOct: nextSlope,
-        },
-        'immediate',
-      )
-      return
-    }
-
-    if (draggingBand.type !== 'lowShelf' && draggingBand.type !== 'highShelf') {
-      return
-    }
-
-    const nextSlope = getNextSlope(
-      draggingBand.slopeDbPerOct,
-      direction,
-      MUSICAL_SLOPE_VALUES,
-    )
-
-    if (nextSlope === draggingBand.slopeDbPerOct) {
-      return
-    }
-
-    commitBand(
-      onBandCommit,
-      {
-        ...draggingBand,
-        slopeDbPerOct: nextSlope,
-      },
-      'immediate',
-    )
+    applyDragWheelDelta(event.deltaY)
   }
 
   function startEditing(field: EditableField, value: string) {

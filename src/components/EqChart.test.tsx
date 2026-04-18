@@ -188,6 +188,116 @@ describe('EqChart', () => {
     expect(onBandCommit).not.toHaveBeenCalled()
   })
 
+  it('adjusts Q from a global wheel event while dragging', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+
+    const event = new window.WheelEvent('wheel', {
+      deltaY: -100,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(onBandCommit).toHaveBeenCalledWith({
+      ...band,
+      q: 1.15,
+    }, 'immediate')
+  })
+
+  it('prevents default global wheel scrolling while dragging', () => {
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+
+    const event = new window.WheelEvent('wheel', {
+      deltaY: 100,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('stops intercepting global wheel events after dragging ends', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    fireEvent.pointerUp(node, { pointerId: 1 })
+    onBandCommit.mockClear()
+
+    const event = new window.WheelEvent('wheel', {
+      deltaY: -100,
+      cancelable: true,
+    })
+    window.dispatchEvent(event)
+
+    expect(onBandCommit).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
   it('marks pointer drag updates as smooth', () => {
     const onBandCommit = vi.fn()
     const band: EqBand = {
