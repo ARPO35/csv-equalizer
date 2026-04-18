@@ -129,6 +129,40 @@ describe('computeEqCurve', () => {
     expect(steepCurve[2].gainDb).toBeLessThan(gentleCurve[2].gainDb)
   })
 
+  it('lets shelf Q reshape the knee independently from slope', () => {
+    const gentleKnee: EqBand[] = [
+      {
+        id: 'shelf-q-low',
+        type: 'lowShelf',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        q: 0.6,
+        slopeDbPerOct: 24,
+      },
+    ]
+    const resonantKnee: EqBand[] = [
+      {
+        id: 'shelf-q-high',
+        type: 'lowShelf',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 6,
+        q: 1.8,
+        slopeDbPerOct: 24,
+      },
+    ]
+
+    const sampleFrequencies = [100, 1000, 4000]
+    const gentleCurve = computeEqCurve(gentleKnee, sampleFrequencies)
+    const resonantCurve = computeEqCurve(resonantKnee, sampleFrequencies)
+
+    expect(Math.abs(resonantCurve[0].gainDb - gentleCurve[0].gainDb)).toBeLessThan(
+      0.2,
+    )
+    expect(resonantCurve[2].gainDb).not.toBeCloseTo(gentleCurve[2].gainDb, 2)
+  })
+
   it('makes steeper cut slopes more attenuated', () => {
     const gentle: EqBand[] = [
       {
