@@ -1,4 +1,10 @@
-import type { CutSlopeDbPerOct, EqBand, EqBandType, MusicalSlopeDbPerOct } from '../types'
+import type {
+  BellSlopeDbPerOct,
+  CutSlopeDbPerOct,
+  EqBand,
+  EqBandType,
+  MusicalSlopeDbPerOct,
+} from '../types'
 
 type DefaultBandOptions = {
   frequencyHz?: number
@@ -9,9 +15,14 @@ type DefaultBandOptions = {
   isBypassed?: boolean
 }
 
+const BELL_SLOPE_VALUES: BellSlopeDbPerOct[] = [12, 24, 36, 48]
 const MUSICAL_SLOPE_VALUES: MusicalSlopeDbPerOct[] = [6, 12, 18, 24, 30, 36, 42, 48]
 const CUT_SLOPE_VALUES: CutSlopeDbPerOct[] = [12, 24, 36, 48]
 const DEFAULT_FILTER_Q = Math.SQRT1_2
+
+function isBellSlope(value: number): value is BellSlopeDbPerOct {
+  return BELL_SLOPE_VALUES.includes(value as BellSlopeDbPerOct)
+}
 
 function isMusicalSlope(value: number): value is MusicalSlopeDbPerOct {
   return MUSICAL_SLOPE_VALUES.includes(value as MusicalSlopeDbPerOct)
@@ -22,14 +33,25 @@ function isCutSlope(value: number): value is CutSlopeDbPerOct {
 }
 
 function resolveSlopeForType(
+  type: 'peaking',
+  source?: number,
+): BellSlopeDbPerOct
+function resolveSlopeForType(
   type: 'lowCut' | 'highCut',
   source?: number,
 ): CutSlopeDbPerOct
 function resolveSlopeForType(
-  type: 'peaking' | 'lowShelf' | 'highShelf',
+  type: 'lowShelf' | 'highShelf',
   source?: number,
 ): MusicalSlopeDbPerOct
 function resolveSlopeForType(type: EqBandType, source?: number) {
+  if (type === 'peaking') {
+    if (source !== undefined && isBellSlope(source)) {
+      return source
+    }
+    return 12 as BellSlopeDbPerOct
+  }
+
   if (type === 'lowCut' || type === 'highCut') {
     if (source !== undefined && isCutSlope(source)) {
       return source

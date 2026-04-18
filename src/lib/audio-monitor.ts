@@ -300,7 +300,7 @@ function createBaselineDescriptors(
               frequencyHz: center,
               gainDb: sampleCurveGain(baselineCurve, center),
               q: GRAPH_EQ_Q,
-              slopeDbPerOct: 6,
+              slopeDbPerOct: 12,
               isBypassed: false,
             }
 

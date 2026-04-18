@@ -35,6 +35,7 @@ const GRID_FREQUENCIES = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20
 const MIN_Q = 0.1
 const MAX_Q = 12
 const WHEEL_Q_STEP = 0.05
+const BELL_SLOPE_VALUES = [12, 24, 36, 48] as const
 const MUSICAL_SLOPE_VALUES = [6, 12, 18, 24, 30, 36, 42, 48] as const
 const CUT_SLOPE_VALUES = [12, 24, 36, 48] as const
 const FFT_FADE_FLOOR_DB = 0.75
@@ -278,7 +279,15 @@ function updateBandField(
     }
 
     if (
-      band.type === 'peaking' ||
+      band.type === 'peaking'
+    ) {
+      return {
+        ...band,
+        slopeDbPerOct: getNearestStep(numericValue, BELL_SLOPE_VALUES),
+      }
+    }
+
+    if (
       band.type === 'lowShelf' ||
       band.type === 'highShelf'
     ) {
@@ -1025,7 +1034,9 @@ export function EqChart({
                 type="number"
                 autoFocus
                 step={
-                  popupBand.type === 'lowCut' || popupBand.type === 'highCut'
+                  popupBand.type === 'peaking' ||
+                  popupBand.type === 'lowCut' ||
+                  popupBand.type === 'highCut'
                     ? 12
                     : 6
                 }
