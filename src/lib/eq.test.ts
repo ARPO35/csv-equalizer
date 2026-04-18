@@ -30,8 +30,8 @@ describe('computeEqCurve', () => {
     expect(curve[1].gainDb).toBeGreaterThan(curve[2].gainDb)
   })
 
-  it('makes steeper peaking slopes narrower at the same Q and gain', () => {
-    const gentle: EqBand[] = [
+  it('keeps 12 dB/oct bell as the standard peaking response', () => {
+    const bell: EqBand[] = [
       {
         id: 'peak-12',
         type: 'peaking',
@@ -42,28 +42,48 @@ describe('computeEqCurve', () => {
         slopeDbPerOct: 12,
       },
     ]
+    const curve = computeEqCurve(bell, [500, 1000, 2000])
+
+    expect(curve[1].gainDb).toBeGreaterThan(curve[0].gainDb)
+    expect(curve[1].gainDb).toBeGreaterThan(curve[2].gainDb)
+  })
+
+  it('makes steeper bell slopes flatter near the top while steepening the sides', () => {
+    const gentle: EqBand[] = [
+      {
+        id: 'peak-12',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 9,
+        q: 1,
+        slopeDbPerOct: 12,
+      },
+    ]
     const steep: EqBand[] = [
       {
         id: 'peak-48',
         type: 'peaking',
         frequencyHz: 1000,
         isBypassed: false,
-        gainDb: 6,
+        gainDb: 9,
         q: 1,
         slopeDbPerOct: 48,
       },
     ]
 
-    const sampleFrequencies = [500, 1000, 2000]
+    const sampleFrequencies = [350, 850, 1000, 1200, 2800]
     const gentleCurve = computeEqCurve(gentle, sampleFrequencies)
     const steepCurve = computeEqCurve(steep, sampleFrequencies)
 
-    expect(steepCurve[1].gainDb).toBeCloseTo(gentleCurve[1].gainDb, 4)
+    expect(steepCurve[2].gainDb).toBeCloseTo(gentleCurve[2].gainDb, 4)
+    expect(Math.abs(steepCurve[3].gainDb - steepCurve[2].gainDb)).toBeLessThan(0.75)
+    expect(steepCurve[1].gainDb).toBeGreaterThan(gentleCurve[1].gainDb)
     expect(steepCurve[0].gainDb).toBeLessThan(gentleCurve[0].gainDb)
-    expect(steepCurve[2].gainDb).toBeLessThan(gentleCurve[2].gainDb)
+    expect(steepCurve[4].gainDb).toBeLessThan(gentleCurve[4].gainDb)
   })
 
-  it('keeps peaking Q as the primary bandwidth control', () => {
+  it('keeps bell Q as the primary width control when slope is fixed', () => {
     const narrow: EqBand[] = [
       {
         id: 'peak-q-high',
@@ -72,7 +92,7 @@ describe('computeEqCurve', () => {
         isBypassed: false,
         gainDb: 6,
         q: 4,
-        slopeDbPerOct: 12,
+        slopeDbPerOct: 48,
       },
     ]
     const wide: EqBand[] = [
@@ -83,17 +103,52 @@ describe('computeEqCurve', () => {
         isBypassed: false,
         gainDb: 6,
         q: 0.5,
-        slopeDbPerOct: 12,
+        slopeDbPerOct: 48,
       },
     ]
 
-    const sampleFrequencies = [500, 1000, 2000]
+    const sampleFrequencies = [250, 500, 1000, 2000, 4000]
     const narrowCurve = computeEqCurve(narrow, sampleFrequencies)
     const wideCurve = computeEqCurve(wide, sampleFrequencies)
 
-    expect(narrowCurve[1].gainDb).toBeCloseTo(wideCurve[1].gainDb, 4)
+    expect(narrowCurve[2].gainDb).toBeCloseTo(wideCurve[2].gainDb, 4)
+    expect(narrowCurve[1].gainDb).toBeLessThan(wideCurve[1].gainDb)
+    expect(narrowCurve[3].gainDb).toBeLessThan(wideCurve[3].gainDb)
     expect(narrowCurve[0].gainDb).toBeLessThan(wideCurve[0].gainDb)
-    expect(narrowCurve[2].gainDb).toBeLessThan(wideCurve[2].gainDb)
+    expect(narrowCurve[4].gainDb).toBeLessThan(wideCurve[4].gainDb)
+  })
+
+  it('mirrors flat-top boost into a flat-bottom bell cut', () => {
+    const boost: EqBand[] = [
+      {
+        id: 'peak-boost',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: 9,
+        q: 1,
+        slopeDbPerOct: 48,
+      },
+    ]
+    const cut: EqBand[] = [
+      {
+        id: 'peak-cut',
+        type: 'peaking',
+        frequencyHz: 1000,
+        isBypassed: false,
+        gainDb: -9,
+        q: 1,
+        slopeDbPerOct: 48,
+      },
+    ]
+
+    const sampleFrequencies = [350, 850, 1000, 1200, 2800]
+    const boostCurve = computeEqCurve(boost, sampleFrequencies)
+    const cutCurve = computeEqCurve(cut, sampleFrequencies)
+
+    expect(cutCurve[2].gainDb).toBeCloseTo(-boostCurve[2].gainDb, 3)
+    expect(Math.abs(cutCurve[3].gainDb - cutCurve[2].gainDb)).toBeLessThan(0.75)
+    expect(cutCurve[0].gainDb).toBeGreaterThan(cutCurve[1].gainDb)
   })
 
   it('makes steeper shelf slopes transition more sharply', () => {
