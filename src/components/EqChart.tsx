@@ -262,7 +262,7 @@ function updateBandField(
     }
   }
 
-  if (field === 'q' && band.type === 'peaking') {
+  if (field === 'q' && 'q' in band) {
     return {
       ...band,
       q: clampQ(numericValue),
@@ -981,7 +981,7 @@ export function EqChart({
             </div>
           ) : null}
 
-          {popupBand.type === 'peaking' ? (
+          {'q' in popupBand ? (
             <div className="popover-row">
               <span>Q</span>
               {editingField === 'q' ? (

@@ -175,6 +175,39 @@ describe('EqChart', () => {
     }, 'immediate')
   })
 
+  it('allows double-click editing of shelf Q values', async () => {
+    const user = userEvent.setup()
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'lowShelf',
+      frequencyHz: 180,
+      isBypassed: false,
+      gainDb: 4,
+      q: Math.SQRT1_2,
+      slopeDbPerOct: 12,
+    }
+
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const chart = within(container)
+    await user.click(chart.getByLabelText('Low shelf band'))
+    await user.dblClick(chart.getByLabelText('Edit q'))
+    const input = chart.getByLabelText('Q')
+    await user.clear(input)
+    await user.type(input, '1.2{Enter}')
+
+    expect(onBandCommit).toHaveBeenLastCalledWith({
+      ...band,
+      q: 1.2,
+    }, 'immediate')
+  })
+
   it('adjusts Q with the mouse wheel while dragging a peaking band', () => {
     const onBandCommit = vi.fn()
     const band: EqBand = {
@@ -376,6 +409,7 @@ describe('EqChart', () => {
       frequencyHz: 180,
       isBypassed: false,
       gainDb: 4,
+      q: Math.SQRT1_2,
       slopeDbPerOct: 12,
     }
 

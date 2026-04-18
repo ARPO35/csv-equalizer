@@ -104,6 +104,7 @@ describe('computeEqCurve', () => {
         frequencyHz: 1000,
         isBypassed: false,
         gainDb: 6,
+        q: Math.SQRT1_2,
         slopeDbPerOct: 12,
       },
     ]
@@ -114,6 +115,7 @@ describe('computeEqCurve', () => {
         frequencyHz: 1000,
         isBypassed: false,
         gainDb: 6,
+        q: Math.SQRT1_2,
         slopeDbPerOct: 48,
       },
     ]

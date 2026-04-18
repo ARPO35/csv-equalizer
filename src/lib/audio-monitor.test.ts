@@ -228,6 +228,7 @@ describe('audio monitor graph', () => {
         frequencyHz: 120,
         isBypassed: false,
         gainDb: 6,
+        q: Math.SQRT1_2,
         slopeDbPerOct: 30,
       },
     ]

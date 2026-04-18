@@ -14,7 +14,7 @@ describe('file serialization helpers', () => {
   it('serializes presets as indented json', () => {
     expect(
       serializePreset({
-        version: 1,
+        version: 2,
         sourceFileName: 'demo.csv',
         bands: [
           {
@@ -52,11 +52,11 @@ describe('saveTextFile', () => {
     const result = await saveTextFile({
       suggestedName: 'preset.heq.json',
       mimeType: 'application/json',
-      contents: '{"version":1}',
+      contents: '{"version":2}',
     })
 
     expect(window.showSaveFilePicker).toHaveBeenCalled()
-    expect(write).toHaveBeenCalledWith('{"version":1}')
+    expect(write).toHaveBeenCalledWith('{"version":2}')
     expect(result.mode).toBe('picker')
     expect(result.handle).toBe(handle)
   })

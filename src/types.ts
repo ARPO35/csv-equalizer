@@ -32,6 +32,7 @@ export type PeakingBand = BaseBand & {
 export type ShelfBand = BaseBand & {
   type: 'lowShelf' | 'highShelf'
   gainDb: number
+  q: number
   slopeDbPerOct: MusicalSlopeDbPerOct
 }
 
@@ -45,8 +46,8 @@ export type EqBand = PeakingBand | ShelfBand | CutBand
 export type EqBandType = EqBand['type']
 export type BandUpdateMode = 'smooth' | 'immediate'
 
-export type ProjectPresetV1 = {
-  version: 1
+export type ProjectPresetV2 = {
+  version: 2
   sourceFileName?: string
   bands: EqBand[]
 }

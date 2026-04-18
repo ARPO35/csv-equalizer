@@ -26,6 +26,7 @@ describe('band helpers', () => {
       frequencyHz: 1000,
       isBypassed: true,
       gainDb: 3,
+      q: 1.2,
       slopeDbPerOct: 18,
     })
   })

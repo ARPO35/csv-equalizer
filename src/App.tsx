@@ -22,7 +22,7 @@ import {
   serializePreset,
 } from './lib/files'
 import { EqEditorProvider, useEqEditor } from './state'
-import type { BandUpdateMode, EqBand, ProjectPresetV1 } from './types'
+import type { BandUpdateMode, EqBand, ProjectPresetV2 } from './types'
 
 function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
@@ -88,9 +88,9 @@ function EditorShell() {
   const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
   const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
   const canExportCurve = workingBaselineCurve.length > 0
-  const preset = useMemo<ProjectPresetV1>(
+  const preset = useMemo<ProjectPresetV2>(
     () => ({
-      version: 1,
+      version: 2,
       sourceFileName: state.sourceFileName,
       bands: state.bands,
     }),
