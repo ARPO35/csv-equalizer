@@ -6,7 +6,7 @@ import {
   useState,
 } from 'react'
 import { createLogFrequencyGrid } from './curve'
-import { CUT_STAGE_Q, getBandStageProfile } from './filter-stages'
+import { designBandDescriptors } from './filter-coefficients'
 import type { CurvePoint, EqBand, FftOverlay, SpectrumPoint } from '../types'
 
 const GRAPH_EQ_Q = 4.318
@@ -228,35 +228,22 @@ function createBaselineDescriptors(baselineCurve: CurvePoint[]): FilterDescripto
 }
 
 function createBandDescriptors(band: EqBand): FilterDescriptor[] {
-  const { stageCount, stageGainDb, stageQ } = getBandStageProfile(band)
-
-  return Array.from({ length: stageCount }, (_, index) => {
-    if (band.type === 'peaking') {
-      return {
-        key: `${band.id}:${index}`,
-        type: 'peaking',
-        frequencyHz: band.frequencyHz,
-        gainDb: stageGainDb ?? band.gainDb,
-        q: stageQ ?? band.q,
-      } satisfies FilterDescriptor
-    }
-
-    if (band.type === 'lowShelf' || band.type === 'highShelf') {
-      return {
-        key: `${band.id}:${index}`,
-        type: band.type === 'lowShelf' ? 'lowshelf' : 'highshelf',
-        frequencyHz: band.frequencyHz,
-        gainDb: stageGainDb ?? band.gainDb,
-      } satisfies FilterDescriptor
-    }
-
-    return {
-      key: `${band.id}:${index}`,
-      type: band.type === 'lowCut' ? 'highpass' : 'lowpass',
-      frequencyHz: band.frequencyHz,
-      q: stageQ ?? CUT_STAGE_Q,
-    } satisfies FilterDescriptor
-  })
+  return designBandDescriptors(band).map((descriptor) => ({
+    key: descriptor.key,
+    type:
+      descriptor.type === 'lowshelf'
+        ? 'lowshelf'
+        : descriptor.type === 'highshelf'
+          ? 'highshelf'
+          : descriptor.type === 'highpass'
+            ? 'highpass'
+            : descriptor.type === 'lowpass'
+              ? 'lowpass'
+              : 'peaking',
+    frequencyHz: descriptor.frequencyHz,
+    gainDb: descriptor.gainDb,
+    q: descriptor.q,
+  }))
 }
 
 function haveSameFilterStructure(

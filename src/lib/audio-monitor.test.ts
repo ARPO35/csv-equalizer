@@ -255,10 +255,18 @@ describe('audio monitor graph', () => {
 
     syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
 
-    expect(graph.filterNodes).toHaveLength(4)
+    expect(graph.filterNodes).toHaveLength(3)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('peaking')
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBeCloseTo(1.5)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(3)
+    expect(
+      graph.filterNodes.some(
+        (node) =>
+          (node as unknown as FakeBiquadFilterNode).frequency.value === band.frequencyHz,
+      ),
+    ).toBe(true)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBeGreaterThan(0)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeGreaterThan(
+      band.q,
+    )
   })
 
   it('reuses filter nodes when only continuous band parameters change', () => {
@@ -294,10 +302,8 @@ describe('audio monitor graph', () => {
 
     expect(graph.filterNodes[0]).toBe(initialNode)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).frequency.value).toBe(1600)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBe(3)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(
-      1.8 * Math.sqrt(2),
-    )
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).gain.value).toBe(6)
+    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(1.8)
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-6 / 20))
   })
 
@@ -361,11 +367,36 @@ describe('audio monitor graph', () => {
       -8,
     )
 
-    expect(graph.filterNodes).toHaveLength(6)
+    expect(graph.filterNodes).toHaveLength(5)
     expect(graph.filterNodes[0]).not.toBe(initialNode)
-    expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(
-      1.25 * Math.sqrt(6),
-    )
+    expect(
+      graph.filterNodes.some(
+        (node) =>
+          (node as unknown as FakeBiquadFilterNode).frequency.value === initialBands[0].frequencyHz,
+      ),
+    ).toBe(true)
+  })
+
+  it('adds a knee-shaping peaking node when shelf Q departs from the default', () => {
+    const context = new FakeAudioContext() as unknown as AudioContext
+    const graph = createMonitorGraph(context, document.createElement('audio'))
+    const bands: EqBand[] = [
+      {
+        id: 'band-1',
+        type: 'highShelf',
+        frequencyHz: 2400,
+        isBypassed: false,
+        gainDb: 5,
+        q: 1.8,
+        slopeDbPerOct: 24,
+      },
+    ]
+
+    syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8)
+
+    expect(graph.filterNodes).toHaveLength(5)
+    expect((graph.filterNodes.at(-1) as unknown as FakeBiquadFilterNode).type).toBe('peaking')
+    expect((graph.filterNodes.at(-1) as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(1.8)
   })
 
   it('disconnects the monitor graph cleanly', () => {
