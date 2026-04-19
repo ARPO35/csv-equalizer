@@ -13,7 +13,6 @@ export type FftOverlay = {
   postSpectrum: SpectrumPoint[]
 }
 
-export type BellSlopeDbPerOct = 12 | 24 | 36 | 48
 export type MusicalSlopeDbPerOct = 6 | 12 | 18 | 24 | 30 | 36 | 42 | 48
 export type CutSlopeDbPerOct = 12 | 24 | 36 | 48
 
@@ -27,7 +26,7 @@ export type PeakingBand = BaseBand & {
   type: 'peaking'
   gainDb: number
   q: number
-  slopeDbPerOct: BellSlopeDbPerOct
+  slopeDbPerOct: MusicalSlopeDbPerOct
 }
 
 export type ShelfBand = BaseBand & {
@@ -47,8 +46,8 @@ export type EqBand = PeakingBand | ShelfBand | CutBand
 export type EqBandType = EqBand['type']
 export type BandUpdateMode = 'smooth' | 'immediate'
 
-export type ProjectPresetV3 = {
-  version: 3
+export type ProjectPresetV2 = {
+  version: 2
   sourceFileName?: string
   bands: EqBand[]
 }

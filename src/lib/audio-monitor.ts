@@ -6,11 +6,7 @@ import {
   useState,
 } from 'react'
 import { createLogFrequencyGrid } from './curve'
-import {
-  DEFAULT_FILTER_Q,
-  designBandSections,
-  type FilterSection,
-} from './filter-coefficients'
+import { CUT_STAGE_Q, getBandStageProfile } from './filter-stages'
 import type { CurvePoint, EqBand, FftOverlay, SpectrumPoint } from '../types'
 
 const GRAPH_EQ_Q = 4.318
@@ -19,7 +15,6 @@ export const FFT_ANALYSER_MAX_DB = 0
 const FFT_ANALYSER_SIZE = 8192
 const FFT_ANALYSER_SMOOTHING = 0.82
 export const FFT_DISPLAY_GRID_SIZE = 512
-const MONITOR_CROSSFADE_MS = 10
 const GRAPH_EQ_CENTERS = [
   20,
   25,
@@ -57,17 +52,6 @@ const FFT_OVERLAY_FREQUENCIES = createLogFrequencyGrid(FFT_DISPLAY_GRID_SIZE)
 
 type AudioContextConstructor = new () => AudioContext
 
-type SectionDescriptor = FilterSection & {
-  key: string
-}
-
-type MonitorLane = {
-  input: GainNode
-  output: GainNode
-  filterNodes: IIRFilterNode[]
-  descriptors: SectionDescriptor[]
-}
-
 type MonitorGraph = {
   source: MediaElementAudioSourceNode
   dryGain: GainNode
@@ -76,11 +60,17 @@ type MonitorGraph = {
   wetGain: GainNode
   preAnalyser: AnalyserNode
   postAnalyser: AnalyserNode
-  activeLane: MonitorLane
-  stagingLane: MonitorLane
-  filterNodes: IIRFilterNode[]
-  filterDescriptors: SectionDescriptor[]
+  filterNodes: BiquadFilterNode[]
+  filterDescriptors: FilterDescriptor[]
   isConfigured: boolean
+}
+
+type FilterDescriptor = {
+  key: string
+  type: BiquadFilterType
+  frequencyHz: number
+  gainDb?: number
+  q?: number
 }
 
 type SpectrumBuffers = {
@@ -197,133 +187,81 @@ function setAudioParamValue(param: AudioParam, value: number) {
   param.value = value
 }
 
-function scheduleGainTransition(
-  param: AudioParam,
-  value: number,
-  context: AudioContext,
-  durationMs = 0,
+function createDescriptorNode(context: AudioContext, descriptor: FilterDescriptor) {
+  const filter = context.createBiquadFilter()
+  filter.type = descriptor.type
+  return filter
+}
+
+function applyDescriptorToNode(
+  node: BiquadFilterNode,
+  descriptor: FilterDescriptor,
 ) {
-  const now = context.currentTime
+  node.type = descriptor.type
+  setAudioParamValue(node.frequency, descriptor.frequencyHz)
 
-  const cancellableParam = param as AudioParam & {
-    cancelScheduledValues?: (cancelTime: number) => AudioParam
-    setValueAtTime?: (value: number, startTime: number) => AudioParam
-    linearRampToValueAtTime?: (value: number, endTime: number) => AudioParam
+  if (descriptor.gainDb !== undefined) {
+    setAudioParamValue(node.gain, descriptor.gainDb)
   }
 
-  cancellableParam.cancelScheduledValues?.(now)
-
-  if (cancellableParam.setValueAtTime) {
-    cancellableParam.setValueAtTime(param.value, now)
-  } else {
-    param.value = value
-    return
+  if (descriptor.q !== undefined) {
+    setAudioParamValue(node.Q, descriptor.q)
   }
-
-  if (durationMs > 0 && cancellableParam.linearRampToValueAtTime) {
-    cancellableParam.linearRampToValueAtTime(value, now + durationMs / 1000)
-  } else {
-    cancellableParam.setValueAtTime(value, now)
-  }
-
-  param.value = value
 }
 
-function createLane(context: AudioContext): MonitorLane {
-  return {
-    input: context.createGain(),
-    output: context.createGain(),
-    filterNodes: [],
-    descriptors: [],
-  } satisfies MonitorLane
-}
-
-function disconnectLane(lane: MonitorLane) {
-  safeDisconnect(lane.input)
-  lane.filterNodes.forEach((node) => safeDisconnect(node))
-  safeDisconnect(lane.output)
-}
-
-function wireLane(lane: MonitorLane) {
-  safeDisconnect(lane.input)
-  lane.filterNodes.forEach((node) => safeDisconnect(node))
-
-  if (lane.filterNodes.length === 0) {
-    lane.input.connect(lane.output)
-    return
-  }
-
-  lane.input.connect(lane.filterNodes[0])
-
-  lane.filterNodes.forEach((node, index) => {
-    const nextNode = lane.filterNodes[index + 1] ?? lane.output
-    node.connect(nextNode)
-  })
-}
-
-function createSectionNode(
-  context: AudioContext,
-  descriptor: SectionDescriptor,
-) {
-  return context.createIIRFilter(descriptor.feedforward, descriptor.feedback)
-}
-
-function createBaselineDescriptors(
-  baselineCurve: CurvePoint[],
-  sampleRate: number,
-): SectionDescriptor[] {
-  return GRAPH_EQ_CENTERS.flatMap((center, index) => {
-    const band: EqBand =
+function createBaselineDescriptors(baselineCurve: CurvePoint[]): FilterDescriptor[] {
+  return GRAPH_EQ_CENTERS.map((center, index) => ({
+    key: `baseline:${index}`,
+    type:
       index === 0
-        ? {
-            id: `baseline:${index}`,
-            type: 'lowShelf',
-            frequencyHz: center,
-            gainDb: sampleCurveGain(baselineCurve, center),
-            q: DEFAULT_FILTER_Q,
-            slopeDbPerOct: 6,
-            isBypassed: false,
-          }
+        ? 'lowshelf'
         : index === GRAPH_EQ_CENTERS.length - 1
-          ? {
-              id: `baseline:${index}`,
-              type: 'highShelf',
-              frequencyHz: center,
-              gainDb: sampleCurveGain(baselineCurve, center),
-              q: DEFAULT_FILTER_Q,
-              slopeDbPerOct: 6,
-              isBypassed: false,
-            }
-          : {
-              id: `baseline:${index}`,
-              type: 'peaking',
-              frequencyHz: center,
-              gainDb: sampleCurveGain(baselineCurve, center),
-              q: GRAPH_EQ_Q,
-              slopeDbPerOct: 12,
-              isBypassed: false,
-            }
-
-    return designBandSections(band, sampleRate).map((section, sectionIndex) => ({
-      key: `${band.id}:${sectionIndex}`,
-      ...section,
-    }))
-  })
-}
-
-function createBandDescriptors(
-  band: EqBand,
-  sampleRate: number,
-): SectionDescriptor[] {
-  return designBandSections(band, sampleRate).map((section, index) => ({
-    key: `${band.id}:${index}`,
-    ...section,
+          ? 'highshelf'
+          : 'peaking',
+    frequencyHz: center,
+    gainDb: sampleCurveGain(baselineCurve, center),
+    q:
+      index === 0 || index === GRAPH_EQ_CENTERS.length - 1
+        ? undefined
+        : GRAPH_EQ_Q,
   }))
 }
 
-function haveSameSectionStructure(
-  currentDescriptors: SectionDescriptor[],
-  nextDescriptors: SectionDescriptor[],
+function createBandDescriptors(band: EqBand): FilterDescriptor[] {
+  const { stageCount, stageGainDb, stageQ } = getBandStageProfile(band)
+
+  return Array.from({ length: stageCount }, (_, index) => {
+    if (band.type === 'peaking') {
+      return {
+        key: `${band.id}:${index}`,
+        type: 'peaking',
+        frequencyHz: band.frequencyHz,
+        gainDb: stageGainDb ?? band.gainDb,
+        q: stageQ ?? band.q,
+      } satisfies FilterDescriptor
+    }
+
+    if (band.type === 'lowShelf' || band.type === 'highShelf') {
+      return {
+        key: `${band.id}:${index}`,
+        type: band.type === 'lowShelf' ? 'lowshelf' : 'highshelf',
+        frequencyHz: band.frequencyHz,
+        gainDb: stageGainDb ?? band.gainDb,
+      } satisfies FilterDescriptor
+    }
+
+    return {
+      key: `${band.id}:${index}`,
+      type: band.type === 'lowCut' ? 'highpass' : 'lowpass',
+      frequencyHz: band.frequencyHz,
+      q: stageQ ?? CUT_STAGE_Q,
+    } satisfies FilterDescriptor
+  })
+}
+
+function haveSameFilterStructure(
+  currentDescriptors: FilterDescriptor[],
+  nextDescriptors: FilterDescriptor[],
 ) {
   if (currentDescriptors.length !== nextDescriptors.length) {
     return false
@@ -331,51 +269,43 @@ function haveSameSectionStructure(
 
   return currentDescriptors.every((descriptor, index) => {
     const nextDescriptor = nextDescriptors[index]
-    return Boolean(nextDescriptor && descriptor.key === nextDescriptor.key)
-  })
-}
-
-function haveSameSectionDescriptors(
-  currentDescriptors: SectionDescriptor[],
-  nextDescriptors: SectionDescriptor[],
-) {
-  if (!haveSameSectionStructure(currentDescriptors, nextDescriptors)) {
-    return false
-  }
-
-  return currentDescriptors.every((descriptor, index) => {
-    const nextDescriptor = nextDescriptors[index]
-
-    return (
-      descriptor.feedforward.every(
-        (value, coefficientIndex) =>
-          value === nextDescriptor.feedforward[coefficientIndex],
-      ) &&
-      descriptor.feedback.every(
-        (value, coefficientIndex) =>
-          value === nextDescriptor.feedback[coefficientIndex],
-      )
+    return Boolean(
+      nextDescriptor &&
+        descriptor.key === nextDescriptor.key &&
+        descriptor.type === nextDescriptor.type,
     )
   })
 }
 
-function rebuildLane(
+export function createGraphEqNodes(
   context: AudioContext,
-  lane: MonitorLane,
-  descriptors: SectionDescriptor[],
+  baselineCurve: CurvePoint[],
 ) {
-  disconnectLane(lane)
-  lane.filterNodes = descriptors.map((descriptor) =>
-    createSectionNode(context, descriptor),
-  )
-  lane.descriptors = descriptors
-  wireLane(lane)
+  return GRAPH_EQ_CENTERS.map((center, index) => {
+    const filter = context.createBiquadFilter()
+    filter.frequency.value = center
+    filter.gain.value = sampleCurveGain(baselineCurve, center)
+
+    if (index === 0) {
+      filter.type = 'lowshelf'
+      return filter
+    }
+
+    if (index === GRAPH_EQ_CENTERS.length - 1) {
+      filter.type = 'highshelf'
+      return filter
+    }
+
+    filter.type = 'peaking'
+    filter.Q.value = GRAPH_EQ_Q
+    return filter
+  })
 }
 
 export function createMonitorGraph(
   context: AudioContext,
   audioElement: HTMLAudioElement,
-): MonitorGraph {
+) {
   const source = context.createMediaElementSource(audioElement)
   const dryGain = context.createGain()
   const wetInput = context.createGain()
@@ -383,8 +313,6 @@ export function createMonitorGraph(
   const wetGain = context.createGain()
   const preAnalyser = context.createAnalyser()
   const postAnalyser = context.createAnalyser()
-  const activeLane = createLane(context)
-  const stagingLane = createLane(context)
 
   configureAnalyser(preAnalyser)
   configureAnalyser(postAnalyser)
@@ -392,16 +320,8 @@ export function createMonitorGraph(
   source.connect(dryGain)
   dryGain.connect(context.destination)
   source.connect(wetInput)
-  wetInput.connect(preGainNode)
-  preGainNode.connect(preAnalyser)
-  preGainNode.connect(activeLane.input)
-  preGainNode.connect(stagingLane.input)
-  activeLane.output.connect(wetGain)
-  stagingLane.output.connect(wetGain)
   wetGain.connect(context.destination)
   wetGain.connect(postAnalyser)
-  setAudioParamValue(activeLane.output.gain, 1)
-  setAudioParamValue(stagingLane.output.gain, 0)
 
   return {
     source,
@@ -411,8 +331,6 @@ export function createMonitorGraph(
     wetGain,
     preAnalyser,
     postAnalyser,
-    activeLane,
-    stagingLane,
     filterNodes: [],
     filterDescriptors: [],
     isConfigured: false,
@@ -431,51 +349,58 @@ export function syncMonitorGraph(
   const shouldApplyEq = !monitorBypassed
   const baselineDescriptors =
     shouldApplyEq && monitorBaselineEnabled
-      ? createBaselineDescriptors(baselineCurve, context.sampleRate)
+      ? createBaselineDescriptors(baselineCurve)
       : []
   const paramDescriptors = shouldApplyEq
     ? bands
         .filter((band) => !band.isBypassed)
-        .flatMap((band) => createBandDescriptors(band, context.sampleRate))
+        .flatMap((band) => createBandDescriptors(band))
     : []
-  const nextDescriptors = [...baselineDescriptors, ...paramDescriptors]
-  const descriptorsChanged = !haveSameSectionDescriptors(
+  const filterDescriptors = [...baselineDescriptors, ...paramDescriptors]
+  const structureChanged = !haveSameFilterStructure(
     graph.filterDescriptors,
-    nextDescriptors,
+    filterDescriptors,
   )
 
-  if (!graph.isConfigured) {
-    rebuildLane(context, graph.activeLane, nextDescriptors)
-    setAudioParamValue(graph.activeLane.output.gain, 1)
-    setAudioParamValue(graph.stagingLane.output.gain, 0)
-    graph.filterDescriptors = nextDescriptors
-    graph.filterNodes = graph.activeLane.filterNodes
-    graph.isConfigured = true
-  } else if (descriptorsChanged) {
-    rebuildLane(context, graph.stagingLane, nextDescriptors)
-    scheduleGainTransition(
-      graph.activeLane.output.gain,
-      0,
-      context,
-      MONITOR_CROSSFADE_MS,
+  if (structureChanged) {
+    graph.filterNodes.forEach((node) => safeDisconnect(node))
+    graph.filterNodes = filterDescriptors.map((descriptor) =>
+      createDescriptorNode(context, descriptor),
     )
-    scheduleGainTransition(
-      graph.stagingLane.output.gain,
-      1,
-      context,
-      MONITOR_CROSSFADE_MS,
-    )
+  }
 
-    const previousActiveLane = graph.activeLane
-    graph.activeLane = graph.stagingLane
-    graph.stagingLane = previousActiveLane
-    graph.filterDescriptors = nextDescriptors
-    graph.filterNodes = graph.activeLane.filterNodes
+  filterDescriptors.forEach((descriptor, index) => {
+    const node = graph.filterNodes[index]
+    if (!node) {
+      return
+    }
+
+    applyDescriptorToNode(node, descriptor)
+  })
+
+  if (!graph.isConfigured || structureChanged) {
+    safeDisconnect(graph.wetInput)
+    safeDisconnect(graph.preGainNode)
+    graph.wetInput.connect(graph.preGainNode)
+    graph.preGainNode.connect(graph.preAnalyser)
+
+    if (graph.filterNodes.length === 0) {
+      graph.preGainNode.connect(graph.wetGain)
+    } else {
+      graph.preGainNode.connect(graph.filterNodes[0])
+
+      graph.filterNodes.forEach((node, index) => {
+        const nextNode = graph.filterNodes[index + 1] ?? graph.wetGain
+        node.connect(nextNode)
+      })
+    }
   }
 
   setAudioParamValue(graph.preGainNode.gain, dbToLinear(preGainDb))
   setAudioParamValue(graph.dryGain.gain, 0)
   setAudioParamValue(graph.wetGain.gain, 1)
+  graph.filterDescriptors = filterDescriptors
+  graph.isConfigured = true
 }
 
 export function disconnectMonitorGraph(graph: MonitorGraph) {
@@ -486,10 +411,7 @@ export function disconnectMonitorGraph(graph: MonitorGraph) {
   safeDisconnect(graph.wetGain)
   safeDisconnect(graph.preAnalyser)
   safeDisconnect(graph.postAnalyser)
-  disconnectLane(graph.activeLane)
-  disconnectLane(graph.stagingLane)
-  graph.filterNodes = []
-  graph.filterDescriptors = []
+  graph.filterNodes.forEach((node) => safeDisconnect(node))
   graph.isConfigured = false
 }
 

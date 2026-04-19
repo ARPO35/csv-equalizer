@@ -16,7 +16,7 @@ describe('band helpers', () => {
       frequencyHz: 1000,
       gainDb: 3,
       q: 1.2,
-      slopeDbPerOct: 24,
+      slopeDbPerOct: 18,
       isBypassed: true,
     })
 
@@ -27,17 +27,17 @@ describe('band helpers', () => {
       isBypassed: true,
       gainDb: 3,
       q: 1.2,
-      slopeDbPerOct: 24,
+      slopeDbPerOct: 18,
     })
   })
 
   it('falls back to a valid cut slope when converting from unsupported slopes', () => {
-    const band = createDefaultBand('lowShelf', {
+    const band = createDefaultBand('peaking', {
       id: 'band-1',
       frequencyHz: 1000,
       gainDb: 3,
       q: 1.2,
-      slopeDbPerOct: 18,
+      slopeDbPerOct: 6,
     })
 
     expect(convertBandType(band, 'lowCut')).toMatchObject({
