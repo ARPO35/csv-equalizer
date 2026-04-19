@@ -2,6 +2,36 @@ import { describe, expect, it } from 'vitest'
 import { computeEqCurve } from './eq'
 import type { EqBand } from '../types'
 
+function findHalfGainEdge(
+  band: EqBand,
+  targetGainDb: number,
+  lower: boolean,
+  sampleRateHz = 48_000,
+) {
+  let low = Math.log(lower ? Math.max(20, band.frequencyHz / 64) : band.frequencyHz)
+  let high = Math.log(lower ? band.frequencyHz : Math.min(20_000, band.frequencyHz * 64))
+
+  for (let iteration = 0; iteration < 40; iteration += 1) {
+    const middle = (low + high) / 2
+    const frequencyHz = Math.exp(middle)
+    const gainDb = computeEqCurve([band], [frequencyHz], sampleRateHz)[0].gainDb
+
+    if (lower) {
+      if (gainDb > targetGainDb) {
+        high = middle
+      } else {
+        low = middle
+      }
+    } else if (gainDb > targetGainDb) {
+      low = middle
+    } else {
+      high = middle
+    }
+  }
+
+  return Math.exp((low + high) / 2)
+}
+
 describe('computeEqCurve', () => {
   it('returns a flat zero curve when no bands exist', () => {
     const curve = computeEqCurve([], [20, 1000, 20000])
@@ -28,6 +58,27 @@ describe('computeEqCurve', () => {
     const curve = computeEqCurve(bands, [100, 1000, 10000])
     expect(curve[1].gainDb).toBeGreaterThan(curve[0].gainDb)
     expect(curve[1].gainDb).toBeGreaterThan(curve[2].gainDb)
+  })
+
+  it('keeps bell half-gain bandwidth stable across most of the spectrum', () => {
+    const frequencies = [1000, 5000, 10000]
+    const bandwidths = frequencies.map((frequencyHz) => {
+      const band: EqBand = {
+        id: `band-${frequencyHz}`,
+        type: 'peaking',
+        frequencyHz,
+        isBypassed: false,
+        gainDb: 6,
+        q: 1,
+        slopeDbPerOct: 12,
+      }
+      const lower = findHalfGainEdge(band, 3, true)
+      const upper = findHalfGainEdge(band, 3, false)
+      return Math.log2(upper / lower)
+    })
+
+    expect(Math.abs(bandwidths[0] - bandwidths[1])).toBeLessThan(0.05)
+    expect(Math.abs(bandwidths[1] - bandwidths[2])).toBeLessThan(0.05)
   })
 
   it('makes steeper peaking slopes flatter around the top while keeping the center gain', () => {

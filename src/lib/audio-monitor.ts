@@ -6,7 +6,10 @@ import {
   useState,
 } from 'react'
 import { createLogFrequencyGrid } from './curve'
-import { designBandDescriptors } from './filter-coefficients'
+import {
+  designBandTopology,
+  type DesignedSection,
+} from './filter-coefficients'
 import type { CurvePoint, EqBand, FftOverlay, SpectrumPoint } from '../types'
 
 const GRAPH_EQ_Q = 4.318
@@ -15,6 +18,7 @@ export const FFT_ANALYSER_MAX_DB = 0
 const FFT_ANALYSER_SIZE = 8192
 const FFT_ANALYSER_SMOOTHING = 0.82
 export const FFT_DISPLAY_GRID_SIZE = 512
+const PARAM_LANE_CROSSFADE_MS = 5
 const GRAPH_EQ_CENTERS = [
   20,
   25,
@@ -57,12 +61,23 @@ type MonitorGraph = {
   dryGain: GainNode
   wetInput: GainNode
   preGainNode: GainNode
+  paramBus: GainNode
   wetGain: GainNode
   preAnalyser: AnalyserNode
   postAnalyser: AnalyserNode
-  filterNodes: BiquadFilterNode[]
-  filterDescriptors: FilterDescriptor[]
+  baselineNodes: BiquadFilterNode[]
+  baselineDescriptors: FilterDescriptor[]
+  activeParamLane: ParamLane | null
+  stagingParamLane: ParamLane | null
+  laneSwapTimerId: number | null
   isConfigured: boolean
+}
+
+type ParamLane = {
+  input: GainNode
+  mixGain: GainNode
+  filterNodes: IIRFilterNode[]
+  sectionKeys: string[]
 }
 
 type FilterDescriptor = {
@@ -187,6 +202,17 @@ function setAudioParamValue(param: AudioParam, value: number) {
   param.value = value
 }
 
+function scheduleAudioParamValue(
+  param: AudioParam,
+  targetValue: number,
+  startTime: number,
+  durationSeconds: number,
+) {
+  param.cancelScheduledValues(startTime)
+  param.setValueAtTime(param.value, startTime)
+  param.linearRampToValueAtTime(targetValue, startTime + durationSeconds)
+}
+
 function createDescriptorNode(context: AudioContext, descriptor: FilterDescriptor) {
   const filter = context.createBiquadFilter()
   filter.type = descriptor.type
@@ -209,6 +235,51 @@ function applyDescriptorToNode(
   }
 }
 
+function createParamLane(
+  context: AudioContext,
+  sections: DesignedSection[],
+) {
+  const input = context.createGain()
+  const mixGain = context.createGain()
+  const filterNodes = sections.map(({ section }) =>
+    context.createIIRFilter(
+      Array.from(section.feedforward),
+      Array.from(section.feedback),
+    ),
+  )
+
+  if (filterNodes.length === 0) {
+    input.connect(mixGain)
+  } else {
+    input.connect(filterNodes[0])
+    filterNodes.forEach((node, index) => {
+      const nextNode = filterNodes[index + 1] ?? mixGain
+      node.connect(nextNode)
+    })
+  }
+
+  return {
+    input,
+    mixGain,
+    filterNodes,
+    sectionKeys: sections.map(({ key }) => key),
+  } satisfies ParamLane
+}
+
+function disconnectParamLane(lane: ParamLane) {
+  safeDisconnect(lane.input)
+  safeDisconnect(lane.mixGain)
+  lane.filterNodes.forEach((node) => safeDisconnect(node))
+}
+
+function haveSameSectionKeys(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((key, index) => key === right[index])
+}
+
 function createBaselineDescriptors(baselineCurve: CurvePoint[]): FilterDescriptor[] {
   return GRAPH_EQ_CENTERS.map((center, index) => ({
     key: `baseline:${index}`,
@@ -227,23 +298,11 @@ function createBaselineDescriptors(baselineCurve: CurvePoint[]): FilterDescripto
   }))
 }
 
-function createBandDescriptors(band: EqBand): FilterDescriptor[] {
-  return designBandDescriptors(band).map((descriptor) => ({
-    key: descriptor.key,
-    type:
-      descriptor.type === 'lowshelf'
-        ? 'lowshelf'
-        : descriptor.type === 'highshelf'
-          ? 'highshelf'
-          : descriptor.type === 'highpass'
-            ? 'highpass'
-            : descriptor.type === 'lowpass'
-              ? 'lowpass'
-              : 'peaking',
-    frequencyHz: descriptor.frequencyHz,
-    gainDb: descriptor.gainDb,
-    q: descriptor.q,
-  }))
+function createBandSections(
+  band: EqBand,
+  sampleRate: number,
+): DesignedSection[] {
+  return designBandTopology(band, sampleRate)
 }
 
 function haveSameFilterStructure(
@@ -292,11 +351,12 @@ export function createGraphEqNodes(
 export function createMonitorGraph(
   context: AudioContext,
   audioElement: HTMLAudioElement,
-) {
+): MonitorGraph {
   const source = context.createMediaElementSource(audioElement)
   const dryGain = context.createGain()
   const wetInput = context.createGain()
   const preGainNode = context.createGain()
+  const paramBus = context.createGain()
   const wetGain = context.createGain()
   const preAnalyser = context.createAnalyser()
   const postAnalyser = context.createAnalyser()
@@ -315,13 +375,17 @@ export function createMonitorGraph(
     dryGain,
     wetInput,
     preGainNode,
+    paramBus,
     wetGain,
     preAnalyser,
     postAnalyser,
-    filterNodes: [],
-    filterDescriptors: [],
+    baselineNodes: [],
+    baselineDescriptors: [],
+    activeParamLane: null,
+    stagingParamLane: null,
+    laneSwapTimerId: null,
     isConfigured: false,
-  } satisfies MonitorGraph
+  }
 }
 
 export function syncMonitorGraph(
@@ -338,26 +402,27 @@ export function syncMonitorGraph(
     shouldApplyEq && monitorBaselineEnabled
       ? createBaselineDescriptors(baselineCurve)
       : []
-  const paramDescriptors = shouldApplyEq
+  const paramSections = shouldApplyEq
     ? bands
         .filter((band) => !band.isBypassed)
-        .flatMap((band) => createBandDescriptors(band))
+        .flatMap((band) => createBandSections(band, context.sampleRate))
     : []
-  const filterDescriptors = [...baselineDescriptors, ...paramDescriptors]
-  const structureChanged = !haveSameFilterStructure(
-    graph.filterDescriptors,
-    filterDescriptors,
+  const baselineStructureChanged = !haveSameFilterStructure(
+    graph.baselineDescriptors,
+    baselineDescriptors,
   )
+  const nextSectionKeys = paramSections.map(({ key }) => key)
+  const activeSectionKeys = graph.activeParamLane?.sectionKeys ?? []
 
-  if (structureChanged) {
-    graph.filterNodes.forEach((node) => safeDisconnect(node))
-    graph.filterNodes = filterDescriptors.map((descriptor) =>
+  if (baselineStructureChanged) {
+    graph.baselineNodes.forEach((node) => safeDisconnect(node))
+    graph.baselineNodes = baselineDescriptors.map((descriptor) =>
       createDescriptorNode(context, descriptor),
     )
   }
 
-  filterDescriptors.forEach((descriptor, index) => {
-    const node = graph.filterNodes[index]
+  baselineDescriptors.forEach((descriptor, index) => {
+    const node = graph.baselineNodes[index]
     if (!node) {
       return
     }
@@ -365,40 +430,130 @@ export function syncMonitorGraph(
     applyDescriptorToNode(node, descriptor)
   })
 
-  if (!graph.isConfigured || structureChanged) {
-    safeDisconnect(graph.wetInput)
-    safeDisconnect(graph.preGainNode)
-    graph.wetInput.connect(graph.preGainNode)
-    graph.preGainNode.connect(graph.preAnalyser)
-
-    if (graph.filterNodes.length === 0) {
-      graph.preGainNode.connect(graph.wetGain)
-    } else {
-      graph.preGainNode.connect(graph.filterNodes[0])
-
-      graph.filterNodes.forEach((node, index) => {
-        const nextNode = graph.filterNodes[index + 1] ?? graph.wetGain
-        node.connect(nextNode)
-      })
-    }
-  }
-
   setAudioParamValue(graph.preGainNode.gain, dbToLinear(preGainDb))
   setAudioParamValue(graph.dryGain.gain, 0)
   setAudioParamValue(graph.wetGain.gain, 1)
-  graph.filterDescriptors = filterDescriptors
+  graph.baselineDescriptors = baselineDescriptors
+
+  const nextLane = createParamLane(context, paramSections)
+
+  if (graph.laneSwapTimerId !== null) {
+    window.clearTimeout(graph.laneSwapTimerId)
+    graph.laneSwapTimerId = null
+    if (graph.activeParamLane) {
+      setAudioParamValue(graph.activeParamLane.mixGain.gain, 1)
+    }
+  }
+
+  if (graph.stagingParamLane) {
+    disconnectParamLane(graph.stagingParamLane)
+    graph.stagingParamLane = null
+  }
+
+  const now = context.currentTime
+  const crossfadeSeconds = PARAM_LANE_CROSSFADE_MS / 1000
+
+  if (!graph.activeParamLane) {
+    graph.activeParamLane = nextLane
+    setAudioParamValue(graph.activeParamLane.mixGain.gain, 1)
+  } else if (haveSameSectionKeys(activeSectionKeys, nextSectionKeys)) {
+    disconnectParamLane(graph.activeParamLane)
+    graph.activeParamLane = nextLane
+    setAudioParamValue(graph.activeParamLane.mixGain.gain, 1)
+  } else {
+    graph.stagingParamLane = nextLane
+    setAudioParamValue(graph.stagingParamLane.mixGain.gain, 0)
+    scheduleAudioParamValue(
+      graph.activeParamLane.mixGain.gain,
+      0,
+      now,
+      crossfadeSeconds,
+    )
+    scheduleAudioParamValue(
+      graph.stagingParamLane.mixGain.gain,
+      1,
+      now,
+      crossfadeSeconds,
+    )
+
+    graph.laneSwapTimerId = window.setTimeout(() => {
+      if (!graph.stagingParamLane) {
+        return
+      }
+
+      const previousActiveLane = graph.activeParamLane
+      graph.activeParamLane = graph.stagingParamLane
+      graph.stagingParamLane = null
+
+      if (previousActiveLane) {
+        disconnectParamLane(previousActiveLane)
+      }
+
+      safeDisconnect(graph.paramBus)
+      graph.paramBus.connect(graph.activeParamLane.input)
+      graph.laneSwapTimerId = null
+    }, PARAM_LANE_CROSSFADE_MS + 1)
+  }
+
+  safeDisconnect(graph.wetInput)
+  safeDisconnect(graph.preGainNode)
+  safeDisconnect(graph.paramBus)
+  graph.baselineNodes.forEach((node) => safeDisconnect(node))
+
+  graph.wetInput.connect(graph.preGainNode)
+  graph.preGainNode.connect(graph.preAnalyser)
+
+  let currentOutput: AudioNode = graph.preGainNode
+  if (graph.baselineNodes.length > 0) {
+    currentOutput.connect(graph.baselineNodes[0])
+    graph.baselineNodes.forEach((node, index) => {
+      const nextNode = graph.baselineNodes[index + 1]
+      if (nextNode) {
+        node.connect(nextNode)
+      }
+    })
+    currentOutput = graph.baselineNodes[graph.baselineNodes.length - 1]
+  }
+
+  currentOutput.connect(graph.paramBus)
+
+  if (graph.activeParamLane) {
+    graph.paramBus.connect(graph.activeParamLane.input)
+    safeDisconnect(graph.activeParamLane.mixGain)
+    graph.activeParamLane.mixGain.connect(graph.wetGain)
+  }
+
+  if (graph.stagingParamLane) {
+    graph.paramBus.connect(graph.stagingParamLane.input)
+    safeDisconnect(graph.stagingParamLane.mixGain)
+    graph.stagingParamLane.mixGain.connect(graph.wetGain)
+  }
+
   graph.isConfigured = true
 }
 
 export function disconnectMonitorGraph(graph: MonitorGraph) {
+  if (graph.laneSwapTimerId !== null) {
+    window.clearTimeout(graph.laneSwapTimerId)
+    graph.laneSwapTimerId = null
+  }
   safeDisconnect(graph.source)
   safeDisconnect(graph.dryGain)
   safeDisconnect(graph.wetInput)
   safeDisconnect(graph.preGainNode)
+  safeDisconnect(graph.paramBus)
   safeDisconnect(graph.wetGain)
   safeDisconnect(graph.preAnalyser)
   safeDisconnect(graph.postAnalyser)
-  graph.filterNodes.forEach((node) => safeDisconnect(node))
+  graph.baselineNodes.forEach((node) => safeDisconnect(node))
+  if (graph.activeParamLane) {
+    disconnectParamLane(graph.activeParamLane)
+    graph.activeParamLane = null
+  }
+  if (graph.stagingParamLane) {
+    disconnectParamLane(graph.stagingParamLane)
+    graph.stagingParamLane = null
+  }
   graph.isConfigured = false
 }
 
