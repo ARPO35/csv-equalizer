@@ -228,7 +228,6 @@ describe('audio monitor graph', () => {
         frequencyHz: 120,
         isBypassed: false,
         gainDb: 6,
-        q: Math.SQRT1_2,
         slopeDbPerOct: 30,
       },
     ]
@@ -377,7 +376,7 @@ describe('audio monitor graph', () => {
     ).toBe(true)
   })
 
-  it('adds a knee-shaping peaking node when shelf Q departs from the default', () => {
+  it('keeps shelf monitor topology free of extra knee-shaping filters', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const bands: EqBand[] = [
@@ -387,16 +386,18 @@ describe('audio monitor graph', () => {
         frequencyHz: 2400,
         isBypassed: false,
         gainDb: 5,
-        q: 1.8,
         slopeDbPerOct: 24,
       },
     ]
 
     syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8)
 
-    expect(graph.filterNodes).toHaveLength(5)
-    expect((graph.filterNodes.at(-1) as unknown as FakeBiquadFilterNode).type).toBe('peaking')
-    expect((graph.filterNodes.at(-1) as unknown as FakeBiquadFilterNode).Q.value).toBeCloseTo(1.8)
+    expect(graph.filterNodes).toHaveLength(4)
+    expect(
+      graph.filterNodes.every(
+        (node) => (node as unknown as FakeBiquadFilterNode).type === 'highshelf',
+      ),
+    ).toBe(true)
   })
 
   it('disconnects the monitor graph cleanly', () => {

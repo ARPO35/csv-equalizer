@@ -18,8 +18,6 @@ type DefaultBandOptions = {
 const BELL_SLOPE_VALUES: BellSlopeDbPerOct[] = [12, 24, 36, 48]
 const SHELF_SLOPE_VALUES: ShelfSlopeDbPerOct[] = [6, 12, 18, 24, 30, 36, 42, 48]
 const CUT_SLOPE_VALUES: CutSlopeDbPerOct[] = [12, 24, 36, 48]
-const DEFAULT_FILTER_Q = Math.SQRT1_2
-
 function isBellSlope(value: number): value is BellSlopeDbPerOct {
   return BELL_SLOPE_VALUES.includes(value as BellSlopeDbPerOct)
 }
@@ -98,7 +96,6 @@ export function createDefaultBand(
         frequencyHz,
         isBypassed,
         gainDb: options.gainDb ?? 0,
-        q: options.q ?? DEFAULT_FILTER_Q,
         slopeDbPerOct: resolveSlopeForType(type, options.slopeDbPerOct),
       }
     case 'lowCut':
@@ -142,7 +139,7 @@ export function convertBandType(band: EqBand, nextType: EqBandType): EqBand {
     frequencyHz: band.frequencyHz,
     isBypassed: band.isBypassed,
     gainDb: 'gainDb' in band ? band.gainDb : 0,
-    q: 'q' in band ? band.q : DEFAULT_FILTER_Q,
+    q: 'q' in band ? band.q : undefined,
     slopeDbPerOct: band.slopeDbPerOct,
   })
 }

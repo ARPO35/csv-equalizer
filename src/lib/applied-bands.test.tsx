@@ -148,7 +148,6 @@ describe('useAppliedBands', () => {
       frequencyHz: 1000,
       isBypassed: false,
       gainDb: 6,
-      q: Math.SQRT1_2,
       slopeDbPerOct: 12,
     }
 

@@ -21,25 +21,27 @@ function magnitudesToDbResponse(
 function computeStageResponse(
   band: EqBand,
   frequencies: number[],
+  sampleRateHz: number,
 ): CurvePoint[] {
-  const sections = designBandSections(band, DEFAULT_RESPONSE_SAMPLE_RATE)
+  const sections = designBandSections(band, sampleRateHz)
   const magnitudes = frequencies.map((frequencyHz) =>
-    getCascadeMagnitudeResponse(
-      sections,
-      frequencyHz,
-      DEFAULT_RESPONSE_SAMPLE_RATE,
-    ),
+    getCascadeMagnitudeResponse(sections, frequencyHz, sampleRateHz),
   )
   return magnitudesToDbResponse(frequencies, magnitudes)
 }
 
-function computeBandResponse(band: EqBand, frequencies: number[]) {
-  return computeStageResponse(band, frequencies)
+function computeBandResponse(
+  band: EqBand,
+  frequencies: number[],
+  sampleRateHz: number,
+) {
+  return computeStageResponse(band, frequencies, sampleRateHz)
 }
 
 export function computeEqCurve(
   bands: EqBand[],
   frequencies: number[],
+  sampleRateHz = DEFAULT_RESPONSE_SAMPLE_RATE,
 ): CurvePoint[] {
   if (frequencies.length === 0) {
     return []
@@ -53,7 +55,7 @@ export function computeEqCurve(
   }
 
   return bands.reduce<CurvePoint[]>((sumCurve, band) => {
-    const bandCurve = computeBandResponse(band, frequencies)
+    const bandCurve = computeBandResponse(band, frequencies, sampleRateHz)
     return sumCurve.map((point, index) => ({
       frequencyHz: point.frequencyHz,
       gainDb: point.gainDb + bandCurve[index].gainDb,

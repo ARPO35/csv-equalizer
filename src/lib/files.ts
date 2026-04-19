@@ -1,4 +1,4 @@
-import type { CurvePoint, ProjectPresetV3 } from '../types'
+import type { CurvePoint, ProjectPresetV4 } from '../types'
 
 type SaveFilePickerOptions = {
   suggestedName: string
@@ -42,7 +42,7 @@ export function serializeCurveCsv(points: CurvePoint[]) {
   ].join('\n')
 }
 
-export function serializePreset(preset: ProjectPresetV3) {
+export function serializePreset(preset: ProjectPresetV4) {
   return `${JSON.stringify(preset, null, 2)}\n`
 }
 

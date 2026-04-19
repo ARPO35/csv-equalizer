@@ -14,7 +14,7 @@ describe('file serialization helpers', () => {
   it('serializes presets as indented json', () => {
     expect(
       serializePreset({
-        version: 3,
+        version: 4,
         sourceFileName: 'demo.csv',
         bands: [
           {

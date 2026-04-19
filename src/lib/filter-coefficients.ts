@@ -5,8 +5,6 @@ export const DEFAULT_RESPONSE_SAMPLE_RATE = 48_000
 const MIN_Q = 0.05
 const MIN_BANDWIDTH_OCTAVES = 0.05
 const MAX_SOLVER_GAIN_DB = 48
-const SHELF_RESONANCE_SCALE = 2.5
-
 export type FilterSection = {
   feedforward: [number, number, number]
   feedback: [number, number, number]
@@ -106,13 +104,12 @@ function designLowShelfSection(
   sampleRate: number,
   frequencyHz: number,
   gainDb: number,
-  q: number,
 ) {
   const omega0 = getAngularFrequency(sampleRate, frequencyHz)
   const cosOmega = Math.cos(omega0)
   const sinOmega = Math.sin(omega0)
   const amplitude = 10 ** (gainDb / 40)
-  const alpha = sinOmega / (2 * clampQ(q))
+  const alpha = sinOmega / (2 * DEFAULT_FILTER_Q)
   const twoSqrtAmplitudeAlpha = 2 * Math.sqrt(amplitude) * alpha
 
   return normalizeSection(
@@ -133,13 +130,12 @@ function designHighShelfSection(
   sampleRate: number,
   frequencyHz: number,
   gainDb: number,
-  q: number,
 ) {
   const omega0 = getAngularFrequency(sampleRate, frequencyHz)
   const cosOmega = Math.cos(omega0)
   const sinOmega = Math.sin(omega0)
   const amplitude = 10 ** (gainDb / 40)
-  const alpha = sinOmega / (2 * clampQ(q))
+  const alpha = sinOmega / (2 * DEFAULT_FILTER_Q)
   const twoSqrtAmplitudeAlpha = 2 * Math.sqrt(amplitude) * alpha
 
   return normalizeSection(
@@ -242,14 +238,12 @@ function descriptorToSection(
         sampleRate,
         descriptor.frequencyHz,
         descriptor.gainDb ?? 0,
-        descriptor.q ?? DEFAULT_FILTER_Q,
       )
     case 'highshelf':
       return designHighShelfSection(
         sampleRate,
         descriptor.frequencyHz,
         descriptor.gainDb ?? 0,
-        descriptor.q ?? DEFAULT_FILTER_Q,
       )
     case 'highpass':
       return designHighpassSection(
@@ -424,35 +418,12 @@ function designShelfDescriptors(band: ShelfBand) {
   const stageCount = band.slopeDbPerOct / 6
   const stageGainDb = band.gainDb / stageCount
   const shelfType = band.type === 'lowShelf' ? 'lowshelf' : 'highshelf'
-  const shelfDescriptors = Array.from({ length: stageCount }, (_, index) => ({
+  return Array.from({ length: stageCount }, (_, index) => ({
     key: `${band.id}:shelf:${index}`,
     type: shelfType,
     frequencyHz: band.frequencyHz,
     gainDb: stageGainDb,
   })) satisfies FilterDescriptor[]
-
-  const resonanceGainDb = Number(
-    (
-      ((band.q - DEFAULT_FILTER_Q) / DEFAULT_FILTER_Q) *
-      Math.sign(band.gainDb || 1) *
-      SHELF_RESONANCE_SCALE
-    ).toFixed(3),
-  )
-
-  if (Math.abs(resonanceGainDb) < 0.01) {
-    return shelfDescriptors
-  }
-
-  return [
-    ...shelfDescriptors,
-    {
-      key: `${band.id}:knee`,
-      type: 'peaking' as const,
-      frequencyHz: band.frequencyHz,
-      gainDb: resonanceGainDb,
-      q: Math.max(0.5, band.q),
-    },
-  ]
 }
 
 function designCutDescriptors(band: EqBand) {

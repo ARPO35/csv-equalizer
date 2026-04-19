@@ -140,7 +140,6 @@ describe('computeEqCurve', () => {
         frequencyHz: 1000,
         isBypassed: false,
         gainDb: 6,
-        q: Math.SQRT1_2,
         slopeDbPerOct: 12,
       },
     ]
@@ -151,7 +150,6 @@ describe('computeEqCurve', () => {
         frequencyHz: 1000,
         isBypassed: false,
         gainDb: 6,
-        q: Math.SQRT1_2,
         slopeDbPerOct: 48,
       },
     ]
@@ -163,39 +161,6 @@ describe('computeEqCurve', () => {
     expect(steepCurve[0].gainDb).toBeCloseTo(gentleCurve[0].gainDb, 4)
     expect(steepCurve[1].gainDb).toBeLessThan(gentleCurve[1].gainDb)
     expect(steepCurve[2].gainDb).toBeLessThan(gentleCurve[2].gainDb)
-  })
-
-  it('lets shelf Q reshape the knee without moving the far plateau', () => {
-    const gentleQ: EqBand[] = [
-      {
-        id: 'shelf-q-low',
-        type: 'lowShelf',
-        frequencyHz: 1000,
-        isBypassed: false,
-        gainDb: 6,
-        q: Math.SQRT1_2,
-        slopeDbPerOct: 24,
-      },
-    ]
-    const resonantQ: EqBand[] = [
-      {
-        id: 'shelf-q-high',
-        type: 'lowShelf',
-        frequencyHz: 1000,
-        isBypassed: false,
-        gainDb: 6,
-        q: 1.8,
-        slopeDbPerOct: 24,
-      },
-    ]
-
-    const sampleFrequencies = [100, 1000, 4000]
-    const gentleCurve = computeEqCurve(gentleQ, sampleFrequencies)
-    const resonantCurve = computeEqCurve(resonantQ, sampleFrequencies)
-
-    expect(resonantCurve[0].gainDb).toBeCloseTo(gentleCurve[0].gainDb, 1)
-    expect(Math.abs(resonantCurve[1].gainDb - gentleCurve[1].gainDb)).toBeGreaterThan(0.25)
-    expect(resonantCurve[2].gainDb).toBeCloseTo(gentleCurve[2].gainDb, 0)
   })
 
   it('makes steeper cut slopes more attenuated', () => {
