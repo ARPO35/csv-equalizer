@@ -242,7 +242,7 @@ describe('audio monitor graph', () => {
     expect(graph.preGainNode.gain.value).toBeCloseTo(10 ** (-8 / 20))
   })
 
-  it('builds flattop bell sections as an IIR pair for higher bell slopes', () => {
+  it('builds flattop bell sections as monotonic IIR shoulder stacks for higher bell slopes', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
     const band: EqBand = {
@@ -257,10 +257,12 @@ describe('audio monitor graph', () => {
 
     syncMonitorGraph(context, graph, [band], baselineCurve, false, false, -8)
 
-    expect(graph.activeParamLane?.filterNodes).toHaveLength(2)
+    expect(graph.activeParamLane?.filterNodes).toHaveLength(4)
     expect(graph.activeParamLane?.sectionKeys).toEqual([
-      'band-1:lower',
-      'band-1:upper',
+      'band-1:lower:0',
+      'band-1:lower:1',
+      'band-1:upper:0',
+      'band-1:upper:1',
     ])
   })
 
@@ -319,7 +321,7 @@ describe('audio monitor graph', () => {
     )
 
     expect(graph.activeParamLane).toBe(initialLane)
-    expect(graph.stagingParamLane?.filterNodes).toHaveLength(2)
+    expect(graph.stagingParamLane?.filterNodes).toHaveLength(6)
 
     vi.advanceTimersByTime(6)
 

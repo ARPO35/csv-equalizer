@@ -32,6 +32,16 @@ function findHalfGainEdge(
   return Math.exp((low + high) / 2)
 }
 
+function sampleLogFrequencies(
+  minFrequencyHz: number,
+  maxFrequencyHz: number,
+  count: number,
+) {
+  return Array.from({ length: count }, (_, index) =>
+    minFrequencyHz * (maxFrequencyHz / minFrequencyHz) ** (index / (count - 1)),
+  )
+}
+
 describe('computeEqCurve', () => {
   it('returns a flat zero curve when no bands exist', () => {
     const curve = computeEqCurve([], [20, 1000, 20000])
@@ -115,6 +125,44 @@ describe('computeEqCurve', () => {
     expect(steepCurve[3].gainDb).toBeGreaterThan(gentleCurve[3].gainDb)
     expect(steepCurve[0].gainDb).toBeLessThan(0.5)
     expect(steepCurve[4].gainDb).toBeLessThan(0.5)
+  })
+
+  it('keeps flattop bell boosts free of undershoot and overshoot', () => {
+    const band: EqBand = {
+      id: 'peak-flat',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 6,
+      q: 0.5,
+      slopeDbPerOct: 48,
+    }
+    const frequencies = sampleLogFrequencies(20, 20_000, 256)
+    const curve = computeEqCurve([band], frequencies)
+    const minGain = Math.min(...curve.map((point) => point.gainDb))
+    const maxGain = Math.max(...curve.map((point) => point.gainDb))
+
+    expect(minGain).toBeGreaterThan(-0.1)
+    expect(maxGain).toBeLessThan(6.1)
+  })
+
+  it('keeps flattop bell cuts free of overshoot and undershoot', () => {
+    const band: EqBand = {
+      id: 'peak-flat-cut',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: -6,
+      q: 0.5,
+      slopeDbPerOct: 48,
+    }
+    const frequencies = sampleLogFrequencies(20, 20_000, 256)
+    const curve = computeEqCurve([band], frequencies)
+    const minGain = Math.min(...curve.map((point) => point.gainDb))
+    const maxGain = Math.max(...curve.map((point) => point.gainDb))
+
+    expect(maxGain).toBeLessThan(0.1)
+    expect(minGain).toBeGreaterThan(-6.1)
   })
 
   it('keeps peaking Q as the primary width control at a fixed slope', () => {

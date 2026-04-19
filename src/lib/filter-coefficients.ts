@@ -11,6 +11,7 @@ const MAX_SHELF_SHAPE = 8
 const MIN_SHELF_SHAPE = 0.125
 const NYQUIST_MARGIN = 0.98
 const LOG_2 = Math.log(2)
+const MIN_BELL_TRANSITION_OCTAVES = 0.125
 
 export type FilterSection = {
   feedforward: [number, number, number]
@@ -263,35 +264,40 @@ function getResponseAtFrequencyHz(
   )
 }
 
-function solveFlatTopBellStageGainDb(
+function solveMonotonicBellStageGainDb(
   sampleRate: number,
-  lowerFrequencyHz: number,
-  upperFrequencyHz: number,
+  lowerFrequencies: number[],
+  upperFrequencies: number[],
   targetGainDb: number,
-  shoulderShape: number,
 ) {
-  const centerFrequencyHz = Math.sqrt(lowerFrequencyHz * upperFrequencyHz)
   const direction = Math.sign(targetGainDb) || 1
   const targetMagnitudeGainDb = Math.min(
     MAX_GAIN_SOLVER_DB,
     Math.max(0, Math.abs(targetGainDb)),
   )
+  const centerFrequencyHz = Math.sqrt(
+    lowerFrequencies[lowerFrequencies.length - 1] * upperFrequencies[0],
+  )
   let low = 0
   let high = targetMagnitudeGainDb
 
-  const getCenterGainDb = (stageGainMagnitudeDb: number) => {
+  const getCenterGainDb = (stageGainDbMagnitude: number) => {
     const sections = [
-      designHighShelfSection(
-        sampleRate,
-        lowerFrequencyHz,
-        direction * stageGainMagnitudeDb,
-        shoulderShape,
+      ...lowerFrequencies.map((frequencyHz) =>
+        designHighShelfSection(
+          sampleRate,
+          frequencyHz,
+          direction * stageGainDbMagnitude,
+          1,
+        ),
       ),
-      designHighShelfSection(
-        sampleRate,
-        upperFrequencyHz,
-        direction * -stageGainMagnitudeDb,
-        shoulderShape,
+      ...upperFrequencies.map((frequencyHz) =>
+        designHighShelfSection(
+          sampleRate,
+          frequencyHz,
+          direction * -stageGainDbMagnitude,
+          1,
+        ),
       ),
     ]
 
@@ -321,17 +327,32 @@ function solveFlatTopBellStageGainDb(
   return direction * high
 }
 
-function getBellShoulderShape(slopeDbPerOct: PeakingBand['slopeDbPerOct']) {
-  switch (slopeDbPerOct) {
-    case 24:
-      return 2
-    case 36:
-      return 4
-    case 48:
-      return 8
-    case 12:
-      return 1
+function getBellTransitionWidthOctaves(
+  band: PeakingBand,
+  targetBandwidthOctaves: number,
+) {
+  return Math.min(
+    targetBandwidthOctaves,
+    Math.max(
+      MIN_BELL_TRANSITION_OCTAVES,
+      Math.abs(band.gainDb) / band.slopeDbPerOct,
+    ),
+  )
+}
+
+function getBellStageFrequencies(
+  startFrequencyHz: number,
+  endFrequencyHz: number,
+  count: number,
+) {
+  if (count <= 1) {
+    return [Math.sqrt(startFrequencyHz * endFrequencyHz)]
   }
+
+  const ratio = endFrequencyHz / startFrequencyHz
+  return Array.from({ length: count }, (_, index) =>
+    startFrequencyHz * ratio ** ((index + 0.5) / count),
+  )
 }
 
 function designPeakingTopology(
@@ -355,16 +376,40 @@ function designPeakingTopology(
   }
 
   const bandwidthOctaves = qToBandwidthOctaves(band.q)
-  const lowerFrequencyHz = clampFrequencyHz(
+  const halfGainLowerFrequencyHz = clampFrequencyHz(
     band.frequencyHz / 2 ** (bandwidthOctaves / 2),
     sampleRate,
   )
-  const upperFrequencyHz = clampFrequencyHz(
+  const halfGainUpperFrequencyHz = clampFrequencyHz(
     band.frequencyHz * 2 ** (bandwidthOctaves / 2),
     sampleRate,
   )
+  const transitionWidthOctaves = getBellTransitionWidthOctaves(
+    band,
+    bandwidthOctaves,
+  )
+  const stageCount = band.slopeDbPerOct / 12
+  const lowerTransitionStartFrequencyHz = clampFrequencyHz(
+    halfGainLowerFrequencyHz / 2 ** (transitionWidthOctaves / 2),
+    sampleRate,
+  )
+  const lowerTransitionEndFrequencyHz = clampFrequencyHz(
+    halfGainLowerFrequencyHz * 2 ** (transitionWidthOctaves / 2),
+    sampleRate,
+  )
+  const upperTransitionStartFrequencyHz = clampFrequencyHz(
+    halfGainUpperFrequencyHz / 2 ** (transitionWidthOctaves / 2),
+    sampleRate,
+  )
+  const upperTransitionEndFrequencyHz = clampFrequencyHz(
+    halfGainUpperFrequencyHz * 2 ** (transitionWidthOctaves / 2),
+    sampleRate,
+  )
 
-  if (upperFrequencyHz <= lowerFrequencyHz * 1.05) {
+  if (
+    halfGainUpperFrequencyHz <= halfGainLowerFrequencyHz * 1.05 ||
+    lowerTransitionEndFrequencyHz >= upperTransitionStartFrequencyHz
+  ) {
     return [
       {
         key: `${band.id}:fallback`,
@@ -380,38 +425,36 @@ function designPeakingTopology(
     ]
   }
 
-  const shoulderShape = getBellShoulderShape(band.slopeDbPerOct)
-  const stageGainDb = solveFlatTopBellStageGainDb(
+  const lowerFrequencies = getBellStageFrequencies(
+    lowerTransitionStartFrequencyHz,
+    lowerTransitionEndFrequencyHz,
+    stageCount,
+  )
+  const upperFrequencies = getBellStageFrequencies(
+    upperTransitionStartFrequencyHz,
+    upperTransitionEndFrequencyHz,
+    stageCount,
+  )
+  const stageGainDb = solveMonotonicBellStageGainDb(
     sampleRate,
-    lowerFrequencyHz,
-    upperFrequencyHz,
+    lowerFrequencies,
+    upperFrequencies,
     band.gainDb,
-    shoulderShape,
   )
 
   return [
-    {
-      key: `${band.id}:lower`,
-      type: 'highshelf',
-      frequencyHz: lowerFrequencyHz,
-      section: designHighShelfSection(
-        sampleRate,
-        lowerFrequencyHz,
-        stageGainDb,
-        shoulderShape,
-      ),
-    },
-    {
-      key: `${band.id}:upper`,
-      type: 'highshelf',
-      frequencyHz: upperFrequencyHz,
-      section: designHighShelfSection(
-        sampleRate,
-        upperFrequencyHz,
-        -stageGainDb,
-        shoulderShape,
-      ),
-    },
+    ...lowerFrequencies.map((frequencyHz, index) => ({
+      key: `${band.id}:lower:${index}`,
+      type: 'highshelf' as const,
+      frequencyHz,
+      section: designHighShelfSection(sampleRate, frequencyHz, stageGainDb, 1),
+    })),
+    ...upperFrequencies.map((frequencyHz, index) => ({
+      key: `${band.id}:upper:${index}`,
+      type: 'highshelf' as const,
+      frequencyHz,
+      section: designHighShelfSection(sampleRate, frequencyHz, -stageGainDb, 1),
+    })),
   ]
 }
 
