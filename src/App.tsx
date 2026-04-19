@@ -198,7 +198,7 @@ function EditorShell() {
     return () => {
       window.removeEventListener('keydown', handleDeleteSelectedBand)
     }
-  }, [handleDeleteSelectedBand])
+  }, [])
 
   const handleSaveShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') {
@@ -218,7 +218,7 @@ function EditorShell() {
     return () => {
       window.removeEventListener('keydown', handleSaveShortcut)
     }
-  }, [handleSaveShortcut])
+  }, [])
 
   useEffect(() => {
     return () => {

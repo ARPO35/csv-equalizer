@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FFT_ANALYSER_MAX_DB,
@@ -449,6 +449,64 @@ describe('audio monitor graph', () => {
       preAnalyser as unknown as FakeAudioNode,
       wetGain as unknown as FakeAudioNode,
     ])
+  })
+
+  it('keeps playback listeners stable while fft overlay updates trigger rerenders', () => {
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: HookFakeAudioContext,
+    })
+
+    const audioElement = document.createElement('audio')
+    Object.defineProperty(audioElement, 'paused', {
+      configurable: true,
+      get: () => false,
+    })
+    Object.defineProperty(audioElement, 'ended', {
+      configurable: true,
+      get: () => false,
+    })
+
+    let queuedFrame: FrameRequestCallback | null = null
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      queuedFrame = callback
+      return 1
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+
+    const addEventListenerSpy = vi.spyOn(audioElement, 'addEventListener')
+    const removeEventListenerSpy = vi.spyOn(audioElement, 'removeEventListener')
+
+    const { result } = renderHook(() =>
+      useEqPlaybackMonitor({
+        audioElement,
+        bands: [],
+        baselineCurve,
+        monitorBypassed: false,
+        monitorBaselineEnabled: false,
+        preGainDb: -8,
+      }),
+    )
+
+    expect(addEventListenerSpy.mock.calls.filter(([type]) => type === 'play')).toHaveLength(2)
+    expect(addEventListenerSpy.mock.calls.filter(([type]) => type === 'pause')).toHaveLength(1)
+
+    act(() => {
+      audioElement.dispatchEvent(new Event('play'))
+    })
+
+    expect(queuedFrame).toBeTruthy()
+
+    act(() => {
+      queuedFrame?.(16)
+    })
+
+    expect(result.current.fftOverlay).not.toBeNull()
+    expect(addEventListenerSpy.mock.calls.filter(([type]) => type === 'play')).toHaveLength(2)
+    expect(addEventListenerSpy.mock.calls.filter(([type]) => type === 'pause')).toHaveLength(1)
+    expect(removeEventListenerSpy.mock.calls.filter(([type]) => type === 'pause')).toHaveLength(0)
+    expect(removeEventListenerSpy.mock.calls.filter(([type]) => type === 'ended')).toHaveLength(0)
+    expect(removeEventListenerSpy.mock.calls.filter(([type]) => type === 'emptied')).toHaveLength(0)
   })
 
   it('interpolates analyser bins onto the log-spaced overlay grid without band averaging', () => {

@@ -645,7 +645,7 @@ export function useEqPlaybackMonitor({
       audioElement.removeEventListener('emptied', handleStop)
       clearFftOverlay()
     }
-  }, [audioElement, clearFftOverlay, startFftOverlay])
+  }, [audioElement])
 
   useEffect(() => {
     return () => {
