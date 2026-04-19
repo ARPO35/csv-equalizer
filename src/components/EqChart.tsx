@@ -3,7 +3,6 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
-  type WheelEvent,
   memo,
   useDeferredValue,
   useEffect,
@@ -631,15 +630,6 @@ export function EqChart({
     )
   }
 
-  function handleChartWheel(event: WheelEvent<HTMLDivElement>) {
-    if (!draggingBand || event.deltaY === 0) {
-      return
-    }
-
-    event.preventDefault()
-    applyDragWheelDelta(event.deltaY)
-  }
-
   function startEditing(field: EditableField, value: string) {
     setEditingField(field)
     setEditingDraft(value)
@@ -716,7 +706,7 @@ export function EqChart({
     : 'is-right'
 
   return (
-    <div className="chart-frame" onWheel={handleChartWheel}>
+    <div className="chart-frame">
       <div className="chart-bound-controls chart-bound-controls-top">
         <button type="button" className="axis-button" onClick={onIncreaseViewMax}>
           +
