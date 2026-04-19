@@ -1,4 +1,10 @@
-import type { CutSlopeDbPerOct, EqBand, EqBandType, MusicalSlopeDbPerOct } from '../types'
+import type {
+  BellSlopeDbPerOct,
+  CutSlopeDbPerOct,
+  EqBand,
+  EqBandType,
+  ShelfSlopeDbPerOct,
+} from '../types'
 
 type DefaultBandOptions = {
   frequencyHz?: number
@@ -9,12 +15,17 @@ type DefaultBandOptions = {
   isBypassed?: boolean
 }
 
-const MUSICAL_SLOPE_VALUES: MusicalSlopeDbPerOct[] = [6, 12, 18, 24, 30, 36, 42, 48]
+const BELL_SLOPE_VALUES: BellSlopeDbPerOct[] = [12, 24, 36, 48]
+const SHELF_SLOPE_VALUES: ShelfSlopeDbPerOct[] = [6, 12, 18, 24, 30, 36, 42, 48]
 const CUT_SLOPE_VALUES: CutSlopeDbPerOct[] = [12, 24, 36, 48]
 const DEFAULT_FILTER_Q = Math.SQRT1_2
 
-function isMusicalSlope(value: number): value is MusicalSlopeDbPerOct {
-  return MUSICAL_SLOPE_VALUES.includes(value as MusicalSlopeDbPerOct)
+function isBellSlope(value: number): value is BellSlopeDbPerOct {
+  return BELL_SLOPE_VALUES.includes(value as BellSlopeDbPerOct)
+}
+
+function isShelfSlope(value: number): value is ShelfSlopeDbPerOct {
+  return SHELF_SLOPE_VALUES.includes(value as ShelfSlopeDbPerOct)
 }
 
 function isCutSlope(value: number): value is CutSlopeDbPerOct {
@@ -26,9 +37,13 @@ function resolveSlopeForType(
   source?: number,
 ): CutSlopeDbPerOct
 function resolveSlopeForType(
-  type: 'peaking' | 'lowShelf' | 'highShelf',
+  type: 'peaking',
   source?: number,
-): MusicalSlopeDbPerOct
+): BellSlopeDbPerOct
+function resolveSlopeForType(
+  type: 'lowShelf' | 'highShelf',
+  source?: number,
+): ShelfSlopeDbPerOct
 function resolveSlopeForType(type: EqBandType, source?: number) {
   if (type === 'lowCut' || type === 'highCut') {
     if (source !== undefined && isCutSlope(source)) {
@@ -37,10 +52,17 @@ function resolveSlopeForType(type: EqBandType, source?: number) {
     return 24 as CutSlopeDbPerOct
   }
 
-  if (source !== undefined && isMusicalSlope(source)) {
+  if (type === 'peaking') {
+    if (source !== undefined && isBellSlope(source)) {
+      return source
+    }
+    return 12 as BellSlopeDbPerOct
+  }
+
+  if (source !== undefined && isShelfSlope(source)) {
     return source
   }
-  return 12 as MusicalSlopeDbPerOct
+  return 12 as ShelfSlopeDbPerOct
 }
 
 function createBandId() {

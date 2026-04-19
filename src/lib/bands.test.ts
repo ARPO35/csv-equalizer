@@ -16,7 +16,7 @@ describe('band helpers', () => {
       frequencyHz: 1000,
       gainDb: 3,
       q: 1.2,
-      slopeDbPerOct: 18,
+      slopeDbPerOct: 24,
       isBypassed: true,
     })
 
@@ -27,7 +27,7 @@ describe('band helpers', () => {
       isBypassed: true,
       gainDb: 3,
       q: 1.2,
-      slopeDbPerOct: 18,
+      slopeDbPerOct: 24,
     })
   })
 
@@ -37,13 +37,13 @@ describe('band helpers', () => {
       frequencyHz: 1000,
       gainDb: 3,
       q: 1.2,
-      slopeDbPerOct: 6,
+      slopeDbPerOct: 12,
     })
 
     expect(convertBandType(band, 'lowCut')).toMatchObject({
       id: 'band-1',
       type: 'lowCut',
-      slopeDbPerOct: 24,
+      slopeDbPerOct: 12,
     })
   })
 })
