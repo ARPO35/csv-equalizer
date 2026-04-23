@@ -465,30 +465,6 @@
   fill: rgba(255, 255, 255, 0.12);
 }
 
-.chart-hint {
-  position: absolute;
-  inset: 1rem auto auto 1rem;
-  width: min(23rem, calc(100% - 2rem));
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.85rem 0.95rem;
-  background: rgba(8, 12, 18, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 1.25rem 2.5rem rgba(0, 0, 0, 0.24);
-}
-
-.chart-hint h3 {
-  font-size: 1rem;
-}
-
-.chart-hint p {
-  font-size: 0.9rem;
-}
-
-.chart-hint p:last-child {
-  color: var(--muted-strong);
-}
-
 .band-popover {
   position: fixed;
   z-index: 140;

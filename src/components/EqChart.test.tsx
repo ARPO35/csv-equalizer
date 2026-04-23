@@ -36,7 +36,6 @@ function renderChart(
       outputCurve={baselineCurve}
       bands={[]}
       visualGainDb={30}
-      showFlatHint
       viewMinDb={-15}
       viewMaxDb={15}
       onBandCommit={vi.fn()}
@@ -110,7 +109,6 @@ describe('EqChart', () => {
     renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandDelete,
     })
 
@@ -137,7 +135,6 @@ describe('EqChart', () => {
     renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandCommit,
     })
 
@@ -168,7 +165,6 @@ describe('EqChart', () => {
     const { container } = renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandCommit,
     })
 
@@ -214,7 +210,6 @@ describe('EqChart', () => {
     renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandCommit,
     })
 
@@ -271,7 +266,6 @@ describe('EqChart', () => {
     renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandCommit,
     })
 
@@ -327,7 +321,6 @@ describe('EqChart', () => {
     const { container } = renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandCommit,
     })
 
@@ -365,7 +358,6 @@ describe('EqChart', () => {
     const { container } = renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandCommit,
     })
 
@@ -406,7 +398,6 @@ describe('EqChart', () => {
     renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
       onBandToggleBypass,
     })
 
@@ -430,7 +421,6 @@ describe('EqChart', () => {
     const { container } = renderChart({
       bands: [band],
       selectedBandId: band.id,
-      showFlatHint: false,
     })
 
     await user.click(screen.getByLabelText('Bell band'))
@@ -457,7 +447,6 @@ describe('EqChart', () => {
 
     renderChart({
       bands: [band],
-      showFlatHint: false,
     })
 
     const node = screen.getByLabelText('Bell band')
@@ -496,7 +485,6 @@ describe('EqChart', () => {
     renderChart({
       fftStore: createFftStore(),
       hasFftFrame: true,
-      showFlatHint: false,
     })
 
     expect(screen.getByTestId('fft-canvas')).toBeTruthy()
@@ -517,7 +505,6 @@ describe('EqChart', () => {
     const { rerender } = renderChart({
       fftStore: createFftStore(),
       hasFftFrame: false,
-      showFlatHint: false,
     })
 
     rerender(
@@ -527,7 +514,6 @@ describe('EqChart', () => {
         outputCurve={baselineCurve}
         bands={[]}
         visualGainDb={30}
-        showFlatHint={false}
         viewMinDb={-15}
         viewMaxDb={15}
         onBandCommit={vi.fn()}

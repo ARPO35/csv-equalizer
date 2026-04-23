@@ -608,7 +608,6 @@ export function EqChart({
   visualGainDb,
   bands,
   selectedBandId,
-  showFlatHint,
   viewMinDb,
   viewMaxDb,
   onBandCommit,
@@ -629,7 +628,6 @@ export function EqChart({
   visualGainDb: number
   bands: EqBand[]
   selectedBandId?: string
-  showFlatHint: boolean
   viewMinDb: number
   viewMaxDb: number
   onBandCommit: (band: EqBand, mode: BandUpdateMode) => void
@@ -1146,14 +1144,6 @@ export function EqChart({
           hasFftFrame={hasFftFrame}
           layout={layout}
         />
-      ) : null}
-
-      {showFlatHint && bands.length === 0 ? (
-        <div className="chart-hint">
-          <p className="section-label">Flat start</p>
-          <h3>Import an EQ curve or double-click to start from flat</h3>
-          <p>The chart is already live. Double-click anywhere in the plot to create a peaking band.</p>
-        </div>
       ) : null}
 
       {popupBand && typeof document !== 'undefined'

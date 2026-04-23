@@ -503,7 +503,6 @@ function EditorShell() {
             visualGainDb={state.visualGainDb}
             bands={state.bands}
             selectedBandId={state.selectedBandId}
-            showFlatHint={!state.sourceFileName}
             viewMinDb={state.viewMinDb}
             viewMaxDb={state.viewMaxDb}
             onBandCommit={updateBand}
