@@ -28,10 +28,6 @@ function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
 }
 
-function getSelectedBand(bands: EqBand[], selectedBandId?: string) {
-  return bands.find((band) => band.id === selectedBandId)
-}
-
 function EditorShell() {
   const curveInputRef = useRef<HTMLInputElement | null>(null)
   const audioInputRef = useRef<HTMLInputElement | null>(null)
@@ -39,7 +35,6 @@ function EditorShell() {
   const exportHandleRef = useRef<FileSystemFileHandle | null>(null)
   const audioObjectUrlRef = useRef<string | null>(null)
   const { state, dispatch } = useEqEditor()
-  const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const [isEditingPreGain, setIsEditingPreGain] = useState(false)
   const [preGainDraft, setPreGainDraft] = useState('')
@@ -85,7 +80,6 @@ function EditorShell() {
   const effectivePreGainDb =
     state.preGainMode === 'auto' ? autoPreGainDb : state.manualPreGainDb
   const hasClipRisk = rawOutputPeakDb + effectivePreGainDb > 0
-  const selectedBand = getSelectedBand(state.bands, state.selectedBandId)
   const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
   const canExportCurve = workingBaselineCurve.length > 0
   const preset = useMemo<ProjectPresetV1>(
@@ -294,7 +288,6 @@ function EditorShell() {
       dispatch({ type: 'set-baseline-curve', payload: curve })
       dispatch({ type: 'set-monitor-baseline-enabled', payload: true })
       dispatch({ type: 'set-error', payload: undefined })
-      setStatusMessage(`Loaded baseline EQ from ${file.name}.`)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to parse CSV file.'
@@ -323,7 +316,6 @@ function EditorShell() {
       audioElement.load()
     }
 
-    setStatusMessage(`Loaded monitor audio from ${file.name}.`)
     dispatch({ type: 'set-error', payload: undefined })
     event.target.value = ''
   }
@@ -337,11 +329,6 @@ function EditorShell() {
         handle: presetHandleRef.current,
       })
       presetHandleRef.current = result.handle
-      setStatusMessage(
-        result.mode === 'picker'
-          ? 'Preset saved to the selected file.'
-          : 'Preset downloaded as a local file.',
-      )
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to save preset.'
@@ -365,11 +352,6 @@ function EditorShell() {
         handle: exportHandleRef.current,
       })
       exportHandleRef.current = result.handle
-      setStatusMessage(
-        result.mode === 'picker'
-          ? 'EQ curve exported to the selected file.'
-          : 'EQ curve downloaded as CSV.',
-      )
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to export EQ curve.'
@@ -431,7 +413,7 @@ function EditorShell() {
       </header>
 
       <main className="workspace">
-        <aside className="panel panel-left">
+        <aside className="panel panel-monitor">
           <section className="panel-section">
             <p className="section-label">Monitor</p>
             <div className="monitor-stack">
@@ -477,6 +459,91 @@ function EditorShell() {
             </div>
           </section>
 
+          {state.errorMessage ? (
+            <section className="panel-section">
+              <p className="section-label">Import status</p>
+              <div className="status-box status-error">{state.errorMessage}</div>
+            </section>
+          ) : null}
+
+          {monitorErrorMessage ? (
+            <section className="panel-section">
+              <p className="section-label">Monitor status</p>
+              <div className="status-box status-error">{monitorErrorMessage}</div>
+            </section>
+          ) : null}
+
+        </aside>
+
+        <section className="stage">
+          <div className="stage-header">
+            <div>
+              <p className="section-label">Graph</p>
+              <h2>Q3-style EQ editor</h2>
+            </div>
+            <div className="legend">
+              <span className="legend-item legend-source">Baseline</span>
+              <span className="legend-item legend-eq">Param EQ</span>
+              <span className="legend-item legend-preview">Output</span>
+              {hasFftFrame ? (
+                <>
+                  <span className="legend-item legend-fft-pre">Pre-Gain / Pre-EQ</span>
+                  <span className="legend-item legend-fft-post">Post FFT Diff</span>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <EqChart
+            baselineCurve={workingBaselineCurve}
+            bandCurve={bandCurve}
+            outputCurve={outputCurve}
+            fftStore={fftStore}
+            hasFftFrame={hasFftFrame}
+            visualGainDb={state.visualGainDb}
+            bands={state.bands}
+            selectedBandId={state.selectedBandId}
+            showFlatHint={!state.sourceFileName}
+            viewMinDb={state.viewMinDb}
+            viewMaxDb={state.viewMaxDb}
+            onBandCommit={updateBand}
+            onBandCreate={(band) => dispatch({ type: 'add-band', payload: band })}
+            onBandDelete={handleRemoveBand}
+            onBandToggleBypass={handleToggleBandBypass}
+            onBandSelect={(bandId) =>
+              dispatch({
+                type: 'select-band',
+                payload: bandId ? { id: bandId } : undefined,
+              })
+            }
+            onIncreaseViewMax={() =>
+              dispatch({
+                type: 'set-view-max-db',
+                payload: scaleDbBoundary(state.viewMaxDb, true, false),
+              })
+            }
+            onDecreaseViewMax={() =>
+              dispatch({
+                type: 'set-view-max-db',
+                payload: scaleDbBoundary(state.viewMaxDb, false, false),
+              })
+            }
+            onIncreaseViewMin={() =>
+              dispatch({
+                type: 'set-view-min-db',
+                payload: scaleDbBoundary(state.viewMinDb, true, true),
+              })
+            }
+            onDecreaseViewMin={() =>
+              dispatch({
+                type: 'set-view-min-db',
+                payload: scaleDbBoundary(state.viewMinDb, false, true),
+              })
+            }
+          />
+        </section>
+
+        <aside className="panel panel-session">
           <section className="panel-section">
             <p className="section-label">Session</p>
             <div className="metric-grid">
@@ -605,157 +672,9 @@ function EditorShell() {
               </article>
             </div>
           </section>
-
-          <section className="panel-section">
-            <p className="section-label">Workflow</p>
-            <ol className="workflow-list">
-              <li>Import a baseline EQ or stay on the flat default curve.</li>
-              <li>Double-click inside the graph to create a band.</li>
-              <li>Hover a node to inspect it, drag to move, wheel during drag to tune Q or slope.</li>
-              <li>Use Band bypass to A/B nodes without deleting them.</li>
-              <li>Use Baseline monitor or Monitor bypass to compare what you hear.</li>
-              <li>Switch Pre-Gain between Auto and Manual to control headroom.</li>
-              <li>Save the preset with Ctrl+S and export the final output EQ.</li>
-            </ol>
-          </section>
-
-          {state.errorMessage ? (
-            <section className="panel-section">
-              <p className="section-label">Import status</p>
-              <div className="status-box status-error">{state.errorMessage}</div>
-            </section>
-          ) : null}
-
-          {monitorErrorMessage ? (
-            <section className="panel-section">
-              <p className="section-label">Monitor status</p>
-              <div className="status-box status-error">{monitorErrorMessage}</div>
-            </section>
-          ) : null}
-
-          {statusMessage ? (
-            <section className="panel-section">
-              <p className="section-label">Latest action</p>
-              <div className="status-box status-success">{statusMessage}</div>
-            </section>
-          ) : null}
         </aside>
 
-        <section className="stage">
-          <div className="stage-header">
-            <div>
-              <p className="section-label">Graph</p>
-              <h2>Q3-style EQ editor</h2>
-            </div>
-            <div className="legend">
-              <span className="legend-item legend-source">Baseline</span>
-              <span className="legend-item legend-eq">Param EQ</span>
-              <span className="legend-item legend-preview">Output</span>
-              {hasFftFrame ? (
-                <>
-                  <span className="legend-item legend-fft-pre">Pre-Gain / Pre-EQ</span>
-                  <span className="legend-item legend-fft-post">Post FFT Diff</span>
-                </>
-              ) : null}
-            </div>
-          </div>
-
-          <EqChart
-            baselineCurve={workingBaselineCurve}
-            bandCurve={bandCurve}
-            outputCurve={outputCurve}
-            fftStore={fftStore}
-            hasFftFrame={hasFftFrame}
-            visualGainDb={state.visualGainDb}
-            bands={state.bands}
-            selectedBandId={state.selectedBandId}
-            showFlatHint={!state.sourceFileName}
-            viewMinDb={state.viewMinDb}
-            viewMaxDb={state.viewMaxDb}
-            onBandCommit={updateBand}
-            onBandCreate={(band) => dispatch({ type: 'add-band', payload: band })}
-            onBandDelete={handleRemoveBand}
-            onBandToggleBypass={handleToggleBandBypass}
-            onBandSelect={(bandId) =>
-              dispatch({
-                type: 'select-band',
-                payload: bandId ? { id: bandId } : undefined,
-              })
-            }
-            onIncreaseViewMax={() =>
-              dispatch({
-                type: 'set-view-max-db',
-                payload: scaleDbBoundary(state.viewMaxDb, true, false),
-              })
-            }
-            onDecreaseViewMax={() =>
-              dispatch({
-                type: 'set-view-max-db',
-                payload: scaleDbBoundary(state.viewMaxDb, false, false),
-              })
-            }
-            onIncreaseViewMin={() =>
-              dispatch({
-                type: 'set-view-min-db',
-                payload: scaleDbBoundary(state.viewMinDb, true, true),
-              })
-            }
-            onDecreaseViewMin={() =>
-              dispatch({
-                type: 'set-view-min-db',
-                payload: scaleDbBoundary(state.viewMinDb, false, true),
-              })
-            }
-          />
-        </section>
-
         <aside className="panel panel-right">
-          <section className="panel-section">
-            <p className="section-label">Overview</p>
-            <div className="info-stack">
-              <div className="inspector-card">
-                <h3>{state.sourceFileName ? 'Imported baseline' : 'Flat baseline'}</h3>
-                <p>
-                  {state.sourceFileName
-                    ? 'The imported EQ is preserved in the graph and export. Baseline monitor only decides whether that curve is heard in playback.'
-                    : 'No import is required. The graph starts from a flat 0 dB baseline across the full working grid.'}
-                </p>
-              </div>
-
-              <div className="inspector-card">
-                <h3>{selectedBand ? 'Selected band' : 'No band selected'}</h3>
-                {selectedBand ? (
-                  <p>
-                    {describeBand(selectedBand)} at {Math.round(selectedBand.frequencyHz)} Hz
-                    {'gainDb' in selectedBand
-                      ? `, ${formatDb(selectedBand.gainDb)}`
-                      : `, ${selectedBand.slopeDbPerOct} dB/oct`}
-                    {selectedBand.isBypassed ? ', bypassed' : ''}
-                  </p>
-                ) : (
-                  <p>
-                    Hover or click a node to inspect it. Double-click the graph to create the first band.
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="panel-section">
-            <p className="section-label">Shortcuts</p>
-            <ul className="shortcut-list">
-              <li>Double-click graph: create a peaking band at the cursor.</li>
-              <li>Double-click node: delete that band.</li>
-              <li>Double-click popover values: edit frequency, gain, Q or slope.</li>
-              <li>Double-click Manual Pre-Gain: edit the value inline.</li>
-              <li>Band bypass affects the graph, export and monitor chain.</li>
-              <li>Baseline monitor and Monitor bypass only affect playback.</li>
-              <li>Drag a bell node to adjust Q, or drag shelf/cut nodes to adjust slope.</li>
-              <li>`Ctrl+S` / `Cmd+S`: save the current preset.</li>
-              <li>`Delete` / `Backspace`: remove the selected band.</li>
-            </ul>
-          </section>
-
           <section className="panel-section">
             <p className="section-label">Active stack</p>
             {sortedBands.length === 0 ? (

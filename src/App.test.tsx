@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import App from './App'
@@ -43,9 +43,8 @@ describe('App grid points', () => {
       target: { files: [file] },
     })
 
-    expect(
-      await screen.findByText('Loaded baseline EQ from baseline.csv.'),
-    ).toBeTruthy()
-    expect(screen.getByLabelText('Edit grid points').textContent).toBe('3')
+    await waitFor(() => {
+      expect(screen.getByLabelText('Edit grid points').textContent).toBe('3')
+    })
   })
 })

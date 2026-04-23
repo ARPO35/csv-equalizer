@@ -55,6 +55,7 @@
 .workspace {
   display: grid;
   grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr) minmax(17rem, 20rem);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.75rem;
   min-height: 0;
   padding: 0.75rem;
@@ -74,6 +75,25 @@
   display: flex;
   flex-direction: column;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--panel-scrollbar-thumb) var(--panel-scrollbar-track);
+}
+
+.panel::-webkit-scrollbar {
+  width: 9px;
+}
+
+.panel::-webkit-scrollbar-track {
+  background: var(--panel-scrollbar-track);
+}
+
+.panel::-webkit-scrollbar-thumb {
+  background: var(--panel-scrollbar-thumb);
+  border-radius: 999px;
+}
+
+.panel::-webkit-scrollbar-thumb:hover {
+  background: var(--panel-scrollbar-thumb-hover);
 }
 
 .panel-section {
@@ -83,6 +103,16 @@
 
 .panel-section:last-child {
   border-bottom: none;
+}
+
+.panel-monitor {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.panel-session {
+  grid-column: 1;
+  grid-row: 2;
 }
 
 .metric-grid {
@@ -101,9 +131,7 @@
 }
 
 .metric-grid span,
-.workflow-list,
 .inspector-card p,
-.shortcut-list,
 .readonly-band-list p,
 .monitor-card p {
   color: var(--muted-strong);
@@ -208,15 +236,6 @@
   appearance: textfield;
 }
 
-.workflow-list,
-.shortcut-list {
-  margin: 0.75rem 0 0;
-  padding-left: 1.15rem;
-  display: grid;
-  gap: 0.55rem;
-  font-size: 0.93rem;
-}
-
 .monitor-stack {
   margin-top: 0.75rem;
   display: grid;
@@ -244,11 +263,18 @@
 }
 
 .stage {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.75rem;
   padding: 1rem;
   overflow: hidden;
+}
+
+.panel-right {
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 
 .stage-header {
@@ -588,12 +614,6 @@
   opacity: 0.5;
 }
 
-.info-stack {
-  margin-top: 0.8rem;
-  display: grid;
-  gap: 0.6rem;
-}
-
 .inspector-card {
   display: grid;
   gap: 0.45rem;
@@ -701,16 +721,32 @@
 
   .workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
     overflow: visible;
   }
 
-  .panel-left,
-  .panel-right {
-    order: 2;
+  .panel-monitor,
+  .panel-session,
+  .panel-right,
+  .stage {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .panel-monitor {
+    order: 1;
   }
 
   .stage {
-    order: 1;
+    order: 2;
+  }
+
+  .panel-session {
+    order: 3;
+  }
+
+  .panel-right {
+    order: 4;
   }
 }
 
