@@ -3,29 +3,29 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
-  type WheelEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { convertBandType, createDefaultBand, describeBand } from '../lib/bands'
+import type { FftOverlayStore } from '../lib/audio-monitor'
 import type {
   BandUpdateMode,
   CurvePoint,
   EqBand,
   EqBandType,
-  FftOverlay,
-  SpectrumPoint,
 } from '../types'
 
-const VIEWBOX_WIDTH = 1200
-const VIEWBOX_HEIGHT = 700
-const PADDING = {
-  top: 36,
-  right: 36,
-  bottom: 48,
-  left: 56,
+const BASE_CHART_WIDTH = 1200
+const BASE_CHART_HEIGHT = 700
+const PADDING_RATIO = {
+  top: 36 / BASE_CHART_HEIGHT,
+  right: 36 / BASE_CHART_WIDTH,
+  bottom: 48 / BASE_CHART_HEIGHT,
+  left: 56 / BASE_CHART_WIDTH,
 }
 const MIN_FREQUENCY = 20
 const MAX_FREQUENCY = 20_000
@@ -40,9 +40,44 @@ const FFT_FADE_CEIL_DB = 6
 const FFT_DISPLAY_REFERENCE_FREQUENCY = 1_000
 const FFT_DISPLAY_SLOPE_COMPENSATION_DB_PER_OCT = 3
 const FFT_DISPLAY_GAMMA = 0.35
-const SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT = 2
+const FFT_FILL_STYLE = 'rgba(255, 255, 255, 0.12)'
+const FFT_PRE_LINE_WIDTH = 1.9
+const FFT_POST_LINE_WIDTH = 2.1
+const FALLBACK_FFT_PRE_COLOR = '#9bc6ff'
+const FALLBACK_FFT_POST_COLOR = '#ffca62'
 
 type EditableField = 'frequencyHz' | 'gainDb' | 'q' | 'slopeDbPerOct'
+type FftRenderBuffers = {
+  width: number
+  height: number
+  x: Float32Array
+  preY: Float32Array
+  postY: Float32Array
+}
+type ChartLayout = {
+  width: number
+  height: number
+  padding: {
+    top: number
+    right: number
+    bottom: number
+    left: number
+  }
+  plotRect: {
+    top: number
+    right: number
+    bottom: number
+    left: number
+    width: number
+    height: number
+  }
+}
+type ChartFrameRect = {
+  top: number
+  left: number
+  width: number
+  height: number
+}
 
 function clampValue(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -64,85 +99,60 @@ function formatQValue(value: number) {
   return value.toFixed(2)
 }
 
-function createPath(points: CurvePoint[], minDb: number, maxDb: number) {
-  if (points.length === 0) {
-    return ''
+function createChartLayout(width: number, height: number): ChartLayout {
+  const normalizedWidth = Math.max(1, width)
+  const normalizedHeight = Math.max(1, height)
+  const padding = {
+    top: normalizedHeight * PADDING_RATIO.top,
+    right: normalizedWidth * PADDING_RATIO.right,
+    bottom: normalizedHeight * PADDING_RATIO.bottom,
+    left: normalizedWidth * PADDING_RATIO.left,
+  }
+  const plotRect = {
+    top: padding.top,
+    right: normalizedWidth - padding.right,
+    bottom: normalizedHeight - padding.bottom,
+    left: padding.left,
+    width: Math.max(1, normalizedWidth - padding.left - padding.right),
+    height: Math.max(1, normalizedHeight - padding.top - padding.bottom),
   }
 
-  return points
-    .map((point, index) => {
-      const command = index === 0 ? 'M' : 'L'
-      return `${command}${getX(point.frequencyHz)},${getY(point.gainDb, minDb, maxDb)}`
-    })
-    .join(' ')
+  return {
+    width: normalizedWidth,
+    height: normalizedHeight,
+    padding,
+    plotRect,
+  }
 }
 
-function interpolateCatmullRom(
-  previousValue: number,
-  startValue: number,
-  endValue: number,
-  nextValue: number,
-  t: number,
-) {
-  const tSquared = t * t
-  const tCubed = tSquared * t
+const DEFAULT_CHART_LAYOUT = createChartLayout(BASE_CHART_WIDTH, BASE_CHART_HEIGHT)
+
+function layoutEquals(a: ChartLayout, b: ChartLayout) {
+  return a.width === b.width && a.height === b.height
+}
+
+function frameRectEquals(a: ChartFrameRect | null, b: ChartFrameRect | null) {
+  if (a === b) {
+    return true
+  }
+  if (!a || !b) {
+    return false
+  }
 
   return (
-    0.5 *
-    ((2 * startValue) +
-      (-previousValue + endValue) * t +
-      (2 * previousValue - 5 * startValue + 4 * endValue - nextValue) *
-        tSquared +
-      (-previousValue + 3 * startValue - 3 * endValue + nextValue) * tCubed)
+    a.top === b.top &&
+    a.left === b.left &&
+    a.width === b.width &&
+    a.height === b.height
   )
 }
 
-function createSmoothedSpectrumPoints(points: SpectrumPoint[]) {
-  if (points.length <= 1) {
-    return points
-  }
-
-  const smoothedPoints: SpectrumPoint[] = [points[0]]
-
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const previousPoint = points[Math.max(0, index - 1)]
-    const startPoint = points[index]
-    const endPoint = points[index + 1]
-    const nextPoint = points[Math.min(points.length - 1, index + 2)]
-
-    for (
-      let step = 1;
-      step <= SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT;
-      step += 1
-    ) {
-      const t = step / SPECTRUM_SMOOTHING_SAMPLES_PER_SEGMENT
-      smoothedPoints.push({
-        frequencyHz: clampValue(
-          interpolateCatmullRom(
-            previousPoint.frequencyHz,
-            startPoint.frequencyHz,
-            endPoint.frequencyHz,
-            nextPoint.frequencyHz,
-            t,
-          ),
-          startPoint.frequencyHz,
-          endPoint.frequencyHz,
-        ),
-        levelDb: interpolateCatmullRom(
-          previousPoint.levelDb,
-          startPoint.levelDb,
-          endPoint.levelDb,
-          nextPoint.levelDb,
-          t,
-        ),
-      })
-    }
-  }
-
-  return smoothedPoints
-}
-
-function createSpectrumLinePath(points: SpectrumPoint[], visualGainDb: number) {
+function createPath(
+  points: CurvePoint[],
+  minDb: number,
+  maxDb: number,
+  layout: ChartLayout,
+) {
   if (points.length === 0) {
     return ''
   }
@@ -150,36 +160,26 @@ function createSpectrumLinePath(points: SpectrumPoint[], visualGainDb: number) {
   return points
     .map((point, index) => {
       const command = index === 0 ? 'M' : 'L'
-      return `${command}${getX(point.frequencyHz)},${getSpectrumY(point.levelDb, point.frequencyHz, visualGainDb)}`
+      return `${command}${getX(point.frequencyHz, layout)},${getY(
+        point.gainDb,
+        minDb,
+        maxDb,
+        layout,
+      )}`
     })
     .join(' ')
 }
 
-function createSpectrumFillPath(points: SpectrumPoint[], visualGainDb: number) {
-  if (points.length === 0) {
-    return ''
-  }
-
-  const bottomY = VIEWBOX_HEIGHT - PADDING.bottom
-  const linePath = createSpectrumLinePath(points, visualGainDb)
-  const lastPoint = points[points.length - 1]
-  const firstPoint = points[0]
-
-  return `${linePath} L${getX(lastPoint.frequencyHz)},${bottomY} L${getX(firstPoint.frequencyHz)},${bottomY} Z`
-}
-
-function getX(frequencyHz: number) {
-  const chartWidth = VIEWBOX_WIDTH - PADDING.left - PADDING.right
+function getX(frequencyHz: number, layout: ChartLayout) {
   const minLog = Math.log10(MIN_FREQUENCY)
   const maxLog = Math.log10(MAX_FREQUENCY)
   const value = Math.log10(Math.min(MAX_FREQUENCY, Math.max(MIN_FREQUENCY, frequencyHz)))
 
-  return PADDING.left + ((value - minLog) / (maxLog - minLog)) * chartWidth
+  return layout.plotRect.left + ((value - minLog) / (maxLog - minLog)) * layout.plotRect.width
 }
 
-function getY(gainDb: number, minDb: number, maxDb: number) {
-  const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
-  return PADDING.top + ((maxDb - gainDb) / (maxDb - minDb)) * chartHeight
+function getY(gainDb: number, minDb: number, maxDb: number, layout: ChartLayout) {
+  return layout.plotRect.top + ((maxDb - gainDb) / (maxDb - minDb)) * layout.plotRect.height
 }
 
 export function getSpectrumDisplayLevelDb(
@@ -202,8 +202,8 @@ export function getSpectrumY(
   levelDb: number,
   frequencyHz: number,
   visualGainDb = 0,
+  layout: ChartLayout = DEFAULT_CHART_LAYOUT,
 ) {
-  const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
   const compensatedLevelDb = getSpectrumDisplayLevelDb(
     levelDb,
     frequencyHz,
@@ -212,40 +212,263 @@ export function getSpectrumY(
   const magnitude = clampValue(10 ** (compensatedLevelDb / 20), 0, 1)
   const shapedMagnitude = magnitude ** FFT_DISPLAY_GAMMA
 
-  return PADDING.top + (1 - shapedMagnitude) * chartHeight
+  return layout.plotRect.top + (1 - shapedMagnitude) * layout.plotRect.height
 }
 
-function createSpectrumSegments(
-  preSpectrum: SpectrumPoint[],
-  postSpectrum: SpectrumPoint[],
-  visualGainDb: number,
+function ensureFftRenderBuffers(
+  buffers: FftRenderBuffers | null,
+  length: number,
+  width: number,
+  height: number,
 ) {
-  const segmentCount = Math.min(preSpectrum.length, postSpectrum.length)
-
-  return Array.from({ length: Math.max(0, segmentCount - 1) }, (_, index) => {
-    const leftPre = preSpectrum[index]
-    const rightPre = preSpectrum[index + 1]
-    const leftPost = postSpectrum[index]
-    const rightPost = postSpectrum[index + 1]
-    const averageDiff =
-      (Math.abs(leftPost.levelDb - leftPre.levelDb) +
-        Math.abs(rightPost.levelDb - rightPre.levelDb)) /
-      2
-    const opacity = getFadeOpacity(averageDiff)
-
-    if (opacity <= 0) {
-      return null
-    }
-
+  if (
+    !buffers ||
+    buffers.x.length !== length ||
+    buffers.width !== width ||
+    buffers.height !== height
+  ) {
     return {
-      id: `${leftPost.frequencyHz}-${rightPost.frequencyHz}`,
-      x1: getX(leftPost.frequencyHz),
-      y1: getSpectrumY(leftPost.levelDb, leftPost.frequencyHz, visualGainDb),
-      x2: getX(rightPost.frequencyHz),
-      y2: getSpectrumY(rightPost.levelDb, rightPost.frequencyHz, visualGainDb),
-      opacity,
+      width,
+      height,
+      x: new Float32Array(length),
+      preY: new Float32Array(length),
+      postY: new Float32Array(length),
+    } satisfies FftRenderBuffers
+  }
+
+  return buffers
+}
+
+function getCssVarColor(
+  element: HTMLElement,
+  variableName: string,
+  fallback: string,
+) {
+  const value = getComputedStyle(element).getPropertyValue(variableName).trim()
+  return value || fallback
+}
+
+function FftCanvasOverlay({
+  fftStore,
+  visualGainDb,
+  hasFftFrame,
+  layout,
+}: {
+  fftStore: FftOverlayStore
+  visualGainDb: number
+  hasFftFrame: boolean
+  layout: ChartLayout
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const renderBuffersRef = useRef<FftRenderBuffers | null>(null)
+  const pendingDrawRef = useRef<number | null>(null)
+  const lastVersionRef = useRef<number>(-1)
+  const lastVisualGainRef = useRef<number>(visualGainDb)
+
+  const drawOverlay = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      return
     }
-  }).filter((segment): segment is NonNullable<typeof segment> => segment !== null)
+
+    const context = canvas.getContext('2d')
+    if (!context) {
+      return
+    }
+
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    if (width === 0 || height === 0) {
+      return
+    }
+
+    const snapshot = fftStore.getSnapshot()
+    const visualGainChanged = lastVisualGainRef.current !== visualGainDb
+    if (
+      !visualGainChanged &&
+      lastVersionRef.current === snapshot.version &&
+      hasFftFrame
+    ) {
+      return
+    }
+
+    lastVersionRef.current = snapshot.version
+    lastVisualGainRef.current = visualGainDb
+    context.clearRect(0, 0, width, height)
+
+    if (!hasFftFrame || !snapshot.hasData) {
+      return
+    }
+
+    const pointCount = snapshot.frequencies.length
+    if (pointCount === 0) {
+      return
+    }
+
+    renderBuffersRef.current = ensureFftRenderBuffers(
+      renderBuffersRef.current,
+      pointCount,
+      width,
+      height,
+    )
+    const { x, preY, postY } = renderBuffersRef.current
+    const bottomY = layout.plotRect.bottom
+    const preColor = getCssVarColor(
+      canvas,
+      '--curve-fft-pre',
+      FALLBACK_FFT_PRE_COLOR,
+    )
+    const postColor = getCssVarColor(
+      canvas,
+      '--curve-fft-post',
+      FALLBACK_FFT_POST_COLOR,
+    )
+
+    for (let index = 0; index < pointCount; index += 1) {
+      const frequencyHz = snapshot.frequencies[index]
+      x[index] = getX(frequencyHz, layout)
+      preY[index] = getSpectrumY(
+        snapshot.preLevels[index],
+        frequencyHz,
+        visualGainDb,
+        layout,
+      )
+      postY[index] = getSpectrumY(
+        snapshot.postLevels[index],
+        frequencyHz,
+        visualGainDb,
+        layout,
+      )
+    }
+
+    context.globalAlpha = 1
+    context.beginPath()
+    context.moveTo(x[0], preY[0])
+    for (let index = 1; index < pointCount; index += 1) {
+      context.lineTo(x[index], preY[index])
+    }
+    context.lineTo(x[pointCount - 1], bottomY)
+    context.lineTo(x[0], bottomY)
+    context.closePath()
+    context.fillStyle = FFT_FILL_STYLE
+    context.fill()
+
+    context.beginPath()
+    context.moveTo(x[0], preY[0])
+    for (let index = 1; index < pointCount; index += 1) {
+      context.lineTo(x[index], preY[index])
+    }
+    context.strokeStyle = preColor
+    context.lineWidth = FFT_PRE_LINE_WIDTH
+    context.lineCap = 'round'
+    context.stroke()
+
+    context.strokeStyle = postColor
+    context.lineWidth = FFT_POST_LINE_WIDTH
+    context.lineCap = 'round'
+    for (let index = 0; index < pointCount - 1; index += 1) {
+      const averageDiff =
+        (Math.abs(snapshot.postLevels[index] - snapshot.preLevels[index]) +
+          Math.abs(snapshot.postLevels[index + 1] - snapshot.preLevels[index + 1])) /
+        2
+      const opacity = getFadeOpacity(averageDiff)
+
+      if (opacity <= 0) {
+        continue
+      }
+
+      context.globalAlpha = opacity
+      context.beginPath()
+      context.moveTo(x[index], postY[index])
+      context.lineTo(x[index + 1], postY[index + 1])
+      context.stroke()
+    }
+    context.globalAlpha = 1
+  }, [fftStore, hasFftFrame, layout, visualGainDb])
+
+  const scheduleDraw = useCallback(() => {
+    if (pendingDrawRef.current !== null) {
+      return
+    }
+
+    pendingDrawRef.current = window.requestAnimationFrame(() => {
+      pendingDrawRef.current = null
+      drawOverlay()
+    })
+  }, [drawOverlay])
+
+  const syncCanvasSize = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      return
+    }
+
+    const dpr = window.devicePixelRatio || 1
+    const displayWidth = Math.max(1, Math.round(canvas.clientWidth * dpr))
+    const displayHeight = Math.max(1, Math.round(canvas.clientHeight * dpr))
+
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+      canvas.width = displayWidth
+      canvas.height = displayHeight
+      const context = canvas.getContext('2d')
+      if (context) {
+        context.setTransform(dpr, 0, 0, dpr, 0, 0)
+      }
+      lastVersionRef.current = -1
+    }
+  }, [])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) {
+      return
+    }
+
+    const unsub = fftStore.subscribe(scheduleDraw)
+    const handleResize = () => {
+      syncCanvasSize()
+      scheduleDraw()
+    }
+
+    syncCanvasSize()
+    scheduleDraw()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(handleResize)
+      observer.observe(canvas)
+      return () => {
+        unsub()
+        observer.disconnect()
+        if (pendingDrawRef.current !== null) {
+          cancelAnimationFrame(pendingDrawRef.current)
+          pendingDrawRef.current = null
+        }
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      unsub()
+      window.removeEventListener('resize', handleResize)
+      if (pendingDrawRef.current !== null) {
+        cancelAnimationFrame(pendingDrawRef.current)
+        pendingDrawRef.current = null
+      }
+    }
+  }, [fftStore, scheduleDraw, syncCanvasSize])
+
+  useEffect(() => {
+    scheduleDraw()
+  }, [hasFftFrame, scheduleDraw, visualGainDb])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="chart-fft-canvas"
+      aria-hidden="true"
+      data-testid="fft-canvas"
+    />
+  )
 }
 
 function createYAxisTicks(minDb: number, maxDb: number) {
@@ -380,7 +603,8 @@ export function EqChart({
   baselineCurve,
   bandCurve,
   outputCurve,
-  fftOverlay,
+  fftStore,
+  hasFftFrame = false,
   visualGainDb,
   bands,
   selectedBandId,
@@ -400,7 +624,8 @@ export function EqChart({
   baselineCurve: CurvePoint[]
   bandCurve: CurvePoint[]
   outputCurve: CurvePoint[]
-  fftOverlay?: FftOverlay | null
+  fftStore?: FftOverlayStore | null
+  hasFftFrame?: boolean
   visualGainDb: number
   bands: EqBand[]
   selectedBandId?: string
@@ -417,42 +642,24 @@ export function EqChart({
   onIncreaseViewMin: () => void
   onDecreaseViewMin: () => void
 }) {
+  const frameRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const hoverCloseTimerRef = useRef<number | null>(null)
+  const dragCommitFrameRef = useRef<number | null>(null)
+  const pendingDragBandRef = useRef<EqBand | null>(null)
+  const draggingBandRef = useRef<EqBand | null>(null)
+  const onBandCommitRef = useRef(onBandCommit)
   const [draggingBandId, setDraggingBandId] = useState<string | null>(null)
   const [hoveredBandId, setHoveredBandId] = useState<string | null>(null)
   const [pinnedBandId, setPinnedBandId] = useState<string | null>(null)
   const [editingField, setEditingField] = useState<EditableField | null>(null)
   const [editingDraft, setEditingDraft] = useState('')
+  const [layout, setLayout] = useState<ChartLayout>(DEFAULT_CHART_LAYOUT)
+  const [frameRect, setFrameRect] = useState<ChartFrameRect | null>(null)
 
   const yTicks = useMemo(
     () => createYAxisTicks(viewMinDb, viewMaxDb),
     [viewMaxDb, viewMinDb],
-  )
-  const smoothedPreSpectrum = useMemo(
-    () => createSmoothedSpectrumPoints(fftOverlay?.preSpectrum ?? []),
-    [fftOverlay],
-  )
-  const smoothedPostSpectrum = useMemo(
-    () => createSmoothedSpectrumPoints(fftOverlay?.postSpectrum ?? []),
-    [fftOverlay],
-  )
-  const fftPreLinePath = useMemo(
-    () => createSpectrumLinePath(smoothedPreSpectrum, visualGainDb),
-    [smoothedPreSpectrum, visualGainDb],
-  )
-  const fftPreFillPath = useMemo(
-    () => createSpectrumFillPath(smoothedPreSpectrum, visualGainDb),
-    [smoothedPreSpectrum, visualGainDb],
-  )
-  const fftPostSegments = useMemo(
-    () =>
-      createSpectrumSegments(
-        smoothedPreSpectrum,
-        smoothedPostSpectrum,
-        visualGainDb,
-      ),
-    [smoothedPostSpectrum, smoothedPreSpectrum, visualGainDb],
   )
   const popupBandId = draggingBandId ?? hoveredBandId ?? pinnedBandId
   const popupBand = useMemo(
@@ -464,10 +671,75 @@ export function EqChart({
     [bands, draggingBandId],
   )
 
+  useEffect(() => {
+    onBandCommitRef.current = onBandCommit
+  }, [onBandCommit])
+
+  useEffect(() => {
+    draggingBandRef.current = draggingBand ?? null
+  }, [draggingBand])
 
   useEffect(() => () => {
     if (hoverCloseTimerRef.current !== null) {
       window.clearTimeout(hoverCloseTimerRef.current)
+    }
+    if (dragCommitFrameRef.current !== null) {
+      cancelAnimationFrame(dragCommitFrameRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    const frame = frameRef.current
+    const svg = svgRef.current
+    if (!frame && !svg) {
+      return
+    }
+
+    const updateLayout = () => {
+      const frameBounds = frameRef.current?.getBoundingClientRect() ?? null
+      const svgBounds = svgRef.current?.getBoundingClientRect() ?? null
+      const sourceBounds =
+        frameBounds && frameBounds.width > 0 && frameBounds.height > 0
+          ? frameBounds
+          : svgBounds
+      const width = sourceBounds?.width ?? DEFAULT_CHART_LAYOUT.width
+      const height = sourceBounds?.height ?? DEFAULT_CHART_LAYOUT.height
+      const nextLayout = createChartLayout(width, height)
+      const nextFrameRect = sourceBounds
+        ? {
+            top: sourceBounds.top,
+            left: sourceBounds.left,
+            width: sourceBounds.width,
+            height: sourceBounds.height,
+          }
+        : null
+
+      setLayout((current) =>
+        layoutEquals(current, nextLayout) ? current : nextLayout,
+      )
+      setFrameRect((current) =>
+        frameRectEquals(current, nextFrameRect) ? current : nextFrameRect,
+      )
+    }
+
+    updateLayout()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateLayout)
+      if (frame) {
+        observer.observe(frame)
+      }
+      if (svg) {
+        observer.observe(svg)
+      }
+      return () => {
+        observer.disconnect()
+      }
+    }
+
+    window.addEventListener('resize', updateLayout)
+    return () => {
+      window.removeEventListener('resize', updateLayout)
     }
   }, [])
 
@@ -501,24 +773,22 @@ export function EqChart({
     }
 
     return {
-      x: ((clientX - rect.left) / rect.width) * VIEWBOX_WIDTH,
-      y: ((clientY - rect.top) / rect.height) * VIEWBOX_HEIGHT,
+      x: ((clientX - rect.left) / rect.width) * layout.width,
+      y: ((clientY - rect.top) / rect.height) * layout.height,
     }
   }
 
   function getFrequencyFromX(x: number) {
-    const chartWidth = VIEWBOX_WIDTH - PADDING.left - PADDING.right
-    const clampedX = Math.min(PADDING.left + chartWidth, Math.max(PADDING.left, x))
+    const clampedX = Math.min(layout.plotRect.right, Math.max(layout.plotRect.left, x))
     const minLog = Math.log10(MIN_FREQUENCY)
     const maxLog = Math.log10(MAX_FREQUENCY)
-    const ratio = (clampedX - PADDING.left) / chartWidth
+    const ratio = (clampedX - layout.plotRect.left) / layout.plotRect.width
     return 10 ** (minLog + ratio * (maxLog - minLog))
   }
 
   function getGainFromY(y: number) {
-    const chartHeight = VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom
-    const clampedY = Math.min(PADDING.top + chartHeight, Math.max(PADDING.top, y))
-    const ratio = (clampedY - PADDING.top) / chartHeight
+    const clampedY = Math.min(layout.plotRect.bottom, Math.max(layout.plotRect.top, y))
+    const ratio = (clampedY - layout.plotRect.top) / layout.plotRect.height
     return viewMaxDb - ratio * (viewMaxDb - viewMinDb)
   }
 
@@ -532,94 +802,128 @@ export function EqChart({
       return
     }
 
-    if ('gainDb' in band) {
-      commitBand(
-        onBandCommit,
-        {
-          ...band,
-          frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
-          gainDb: clampGain(getGainFromY(point.y)),
-        },
-        'smooth',
-      )
+    const nextBand =
+      'gainDb' in band
+        ? {
+            ...band,
+            frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
+            gainDb: clampGain(getGainFromY(point.y)),
+          }
+        : {
+            ...band,
+            frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
+          }
+
+    pendingDragBandRef.current = nextBand
+    if (dragCommitFrameRef.current !== null) {
       return
     }
 
-    commitBand(
-      onBandCommit,
-      {
-        ...band,
-        frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
-      },
-      'smooth',
-    )
+    dragCommitFrameRef.current = requestAnimationFrame(() => {
+      dragCommitFrameRef.current = null
+      const pendingBand = pendingDragBandRef.current
+      if (!pendingBand) {
+        return
+      }
+      pendingDragBandRef.current = null
+      commitBand(onBandCommitRef.current, pendingBand, 'smooth')
+    })
   }
 
-  function handleChartWheel(event: WheelEvent<HTMLDivElement>) {
-    if (!draggingBand || event.deltaY === 0) {
+  function flushPendingDragCommit(mode: BandUpdateMode) {
+    if (dragCommitFrameRef.current !== null) {
+      cancelAnimationFrame(dragCommitFrameRef.current)
+      dragCommitFrameRef.current = null
+    }
+
+    const pendingBand = pendingDragBandRef.current
+    pendingDragBandRef.current = null
+    if (!pendingBand) {
+      return null
+    }
+
+    commitBand(onBandCommitRef.current, pendingBand, mode)
+    return pendingBand
+  }
+
+  useEffect(() => {
+    const frame = frameRef.current
+    if (!frame) {
       return
     }
 
-    event.preventDefault()
-    const direction = event.deltaY < 0 ? 1 : -1
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      const activeBand = draggingBandRef.current
+      if (!activeBand || event.deltaY === 0) {
+        return
+      }
 
-    if (draggingBand.type === 'peaking') {
-      commitBand(
-        onBandCommit,
-        {
-          ...draggingBand,
-          q: roundQ(clampQ(draggingBand.q + direction * WHEEL_Q_STEP)),
-        },
-        'immediate',
-      )
-      return
-    }
+      event.preventDefault()
+      const direction = event.deltaY < 0 ? 1 : -1
 
-    if (draggingBand.type === 'lowCut' || draggingBand.type === 'highCut') {
+      if (activeBand.type === 'peaking') {
+        commitBand(
+          onBandCommitRef.current,
+          {
+            ...activeBand,
+            q: roundQ(clampQ(activeBand.q + direction * WHEEL_Q_STEP)),
+          },
+          'immediate',
+        )
+        return
+      }
+
+      if (activeBand.type === 'lowCut' || activeBand.type === 'highCut') {
+        const nextSlope = getNextSlope(
+          activeBand.slopeDbPerOct,
+          direction,
+          CUT_SLOPE_VALUES,
+        )
+
+        if (nextSlope === activeBand.slopeDbPerOct) {
+          return
+        }
+
+        commitBand(
+          onBandCommitRef.current,
+          {
+            ...activeBand,
+            slopeDbPerOct: nextSlope,
+          },
+          'immediate',
+        )
+        return
+      }
+
+      if (activeBand.type !== 'lowShelf' && activeBand.type !== 'highShelf') {
+        return
+      }
+
       const nextSlope = getNextSlope(
-        draggingBand.slopeDbPerOct,
+        activeBand.slopeDbPerOct,
         direction,
-        CUT_SLOPE_VALUES,
+        MUSICAL_SLOPE_VALUES,
       )
 
-      if (nextSlope === draggingBand.slopeDbPerOct) {
+      if (nextSlope === activeBand.slopeDbPerOct) {
         return
       }
 
       commitBand(
-        onBandCommit,
+        onBandCommitRef.current,
         {
-          ...draggingBand,
+          ...activeBand,
           slopeDbPerOct: nextSlope,
         },
         'immediate',
       )
-      return
     }
 
-    if (draggingBand.type !== 'lowShelf' && draggingBand.type !== 'highShelf') {
-      return
+    frame.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      frame.removeEventListener('wheel', handleWheel)
     }
-
-    const nextSlope = getNextSlope(
-      draggingBand.slopeDbPerOct,
-      direction,
-      MUSICAL_SLOPE_VALUES,
-    )
-
-    if (nextSlope === draggingBand.slopeDbPerOct) {
-      return
-    }
-
-    commitBand(
-      onBandCommit,
-      {
-        ...draggingBand,
-        slopeDbPerOct: nextSlope,
-      },
-      'immediate',
-    )
-  }
+  }, [])
 
   function startEditing(field: EditableField, value: string) {
     setEditingField(field)
@@ -687,17 +991,17 @@ export function EqChart({
 
   const popupStyle = popupBand
     ? {
-        left: `${(getX(popupBand.frequencyHz) / VIEWBOX_WIDTH) * 100}%`,
-        top: `${(getY('gainDb' in popupBand ? popupBand.gainDb : 0, viewMinDb, viewMaxDb) / VIEWBOX_HEIGHT) * 100}%`,
+        left: `${(frameRect?.left ?? 0) + getX(popupBand.frequencyHz, layout)}px`,
+        top: `${(frameRect?.top ?? 0) + getY('gainDb' in popupBand ? popupBand.gainDb : 0, viewMinDb, viewMaxDb, layout)}px`,
       }
     : undefined
 
-  const popupAlign = popupBand && getX(popupBand.frequencyHz) > VIEWBOX_WIDTH * 0.68
+  const popupAlign = popupBand && getX(popupBand.frequencyHz, layout) > layout.width * 0.68
     ? 'is-left'
     : 'is-right'
 
   return (
-    <div className="chart-frame" onWheel={handleChartWheel}>
+    <div ref={frameRef} className="chart-frame">
       <div className="chart-bound-controls chart-bound-controls-top">
         <button type="button" className="axis-button" onClick={onIncreaseViewMax}>
           +
@@ -719,32 +1023,37 @@ export function EqChart({
       <svg
         ref={svgRef}
         className="chart-svg"
-        viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
+        viewBox={`0 0 ${layout.width} ${layout.height}`}
         role="img"
         aria-label="EQ editing surface"
         onClick={handleChartClick}
         onDoubleClick={handleChartDoubleClick}
       >
         <rect
-          x={PADDING.left}
-          y={PADDING.top}
-          width={VIEWBOX_WIDTH - PADDING.left - PADDING.right}
-          height={VIEWBOX_HEIGHT - PADDING.top - PADDING.bottom}
+          x={layout.plotRect.left}
+          y={layout.plotRect.top}
+          width={layout.plotRect.width}
+          height={layout.plotRect.height}
           className="chart-area"
         />
 
         {GRID_FREQUENCIES.map((frequency) => {
-          const x = getX(frequency)
+          const x = getX(frequency, layout)
           return (
             <g key={frequency}>
               <line
                 className="grid-line"
                 x1={x}
                 x2={x}
-                y1={PADDING.top}
-                y2={VIEWBOX_HEIGHT - PADDING.bottom}
+                y1={layout.plotRect.top}
+                y2={layout.plotRect.bottom}
               />
-              <text className="axis-label" x={x} y={VIEWBOX_HEIGHT - 18} textAnchor="middle">
+              <text
+                className="axis-label"
+                x={x}
+                y={layout.height - layout.padding.bottom * 0.375}
+                textAnchor="middle"
+              >
                 {formatFrequencyLabel(frequency)}
               </text>
             </g>
@@ -752,60 +1061,34 @@ export function EqChart({
         })}
 
         {yTicks.map((value) => {
-          const y = getY(value, viewMinDb, viewMaxDb)
+          const y = getY(value, viewMinDb, viewMaxDb, layout)
           return (
             <g key={value}>
               <line
                 className={value === 0 ? 'grid-line zero-line' : 'grid-line'}
-                x1={PADDING.left}
-                x2={VIEWBOX_WIDTH - PADDING.right}
+                x1={layout.plotRect.left}
+                x2={layout.plotRect.right}
                 y1={y}
                 y2={y}
               />
-              <text className="axis-label" x={PADDING.left - 14} y={y + 5} textAnchor="end">
+              <text className="axis-label" x={layout.plotRect.left - 14} y={y + 5} textAnchor="end">
                 {value}
               </text>
             </g>
           )
         })}
 
-        <path className="curve curve-source" d={createPath(baselineCurve, viewMinDb, viewMaxDb)} />
-        <path className="curve curve-eq" d={createPath(bandCurve, viewMinDb, viewMaxDb)} />
-        <path className="curve curve-preview" d={createPath(outputCurve, viewMinDb, viewMaxDb)} />
-        {fftOverlay ? (
-          <g aria-hidden="true">
-            <path
-              data-testid="fft-pre-fill"
-              className="fft-overlay-fill"
-              d={fftPreFillPath}
-            />
-            <path
-              data-testid="fft-pre-line"
-              className="curve curve-fft-pre-line"
-              d={fftPreLinePath}
-            />
-            {fftPostSegments.map((segment) => (
-              <line
-                key={segment.id}
-                data-testid="fft-post-segment"
-                className="curve-fft-post-segment"
-                x1={segment.x1}
-                y1={segment.y1}
-                x2={segment.x2}
-                y2={segment.y2}
-                strokeOpacity={segment.opacity}
-              />
-            ))}
-          </g>
-        ) : null}
+        <path className="curve curve-source" d={createPath(baselineCurve, viewMinDb, viewMaxDb, layout)} />
+        <path className="curve curve-eq" d={createPath(bandCurve, viewMinDb, viewMaxDb, layout)} />
+        <path className="curve curve-preview" d={createPath(outputCurve, viewMinDb, viewMaxDb, layout)} />
 
         {bands.map((band) => (
           <g key={band.id}>
             <circle
               aria-label={`${describeBand(band)} band`}
               className={`band-node ${band.id === selectedBandId ? 'is-selected' : ''} ${band.isBypassed ? 'is-bypassed' : ''}`}
-              cx={getX(band.frequencyHz)}
-              cy={getY('gainDb' in band ? band.gainDb : 0, viewMinDb, viewMaxDb)}
+              cx={getX(band.frequencyHz, layout)}
+              cy={getY('gainDb' in band ? band.gainDb : 0, viewMinDb, viewMaxDb, layout)}
               r={band.id === selectedBandId ? 8 : 6}
               onMouseEnter={() => {
                 clearHoverTimer()
@@ -837,8 +1120,9 @@ export function EqChart({
               onPointerMove={(event) => handlePointerMove(event, band)}
               onPointerUp={(event) => {
                 setDraggingBandId(null)
-                if (draggingBand) {
-                  commitBand(onBandCommit, draggingBand, 'immediate')
+                const committedBand = flushPendingDragCommit('immediate')
+                if (!committedBand && draggingBandRef.current) {
+                  commitBand(onBandCommitRef.current, draggingBandRef.current, 'immediate')
                 }
                 if (
                   'hasPointerCapture' in event.currentTarget &&
@@ -847,11 +1131,22 @@ export function EqChart({
                   event.currentTarget.releasePointerCapture(event.pointerId)
                 }
               }}
-              onPointerCancel={() => setDraggingBandId(null)}
+              onPointerCancel={() => {
+                flushPendingDragCommit('immediate')
+                setDraggingBandId(null)
+              }}
             />
           </g>
         ))}
       </svg>
+      {fftStore ? (
+        <FftCanvasOverlay
+          fftStore={fftStore}
+          visualGainDb={visualGainDb}
+          hasFftFrame={hasFftFrame}
+          layout={layout}
+        />
+      ) : null}
 
       {showFlatHint && bands.length === 0 ? (
         <div className="chart-hint">
@@ -861,209 +1156,214 @@ export function EqChart({
         </div>
       ) : null}
 
-      {popupBand ? (
-        <div
-          className={`band-popover ${popupAlign} ${popupBand.isBypassed ? 'is-bypassed' : ''}`}
-          style={popupStyle}
-          onMouseEnter={() => {
-            clearHoverTimer()
-            setHoveredBandId(popupBand.id)
-          }}
-          onMouseLeave={() => {
-            if (popupBand.id !== pinnedBandId) {
-              setHoveredBandId(null)
-            }
-          }}
-        >
-          <div className="band-popover-header">
-            <div>
-              <p className="section-label">Selected node</p>
-              <strong>{describeBand(popupBand)}</strong>
-            </div>
-            <button
-              type="button"
-              className="band-popover-close"
-              aria-label="Delete band"
-              onClick={() => onBandDelete(popupBand.id)}
+      {popupBand && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className={`band-popover ${popupAlign} ${popupBand.isBypassed ? 'is-bypassed' : ''}`}
+              style={popupStyle}
+              onMouseEnter={() => {
+                clearHoverTimer()
+                setHoveredBandId(popupBand.id)
+              }}
+              onMouseLeave={() => {
+                if (popupBand.id !== pinnedBandId) {
+                  setHoveredBandId(null)
+                }
+              }}
             >
-              x
-            </button>
-          </div>
-
-          <div className="popover-row">
-            <span>Band bypass</span>
-            <button
-              type="button"
-              className={`chip-button ${popupBand.isBypassed ? 'is-active' : ''}`}
-              aria-pressed={popupBand.isBypassed}
-              onClick={() => onBandToggleBypass(popupBand.id)}
-            >
-              {popupBand.isBypassed ? 'Bypassed' : 'Active'}
-            </button>
-          </div>
-
-          <label className="popover-row">
-            <span>Type</span>
-            <select
-              value={popupBand.type}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                commitBand(
-                  onBandCommit,
-                  convertBandType(popupBand, event.target.value as EqBandType),
-                  'immediate',
-                )
-              }
-            >
-              <option value="peaking">Bell</option>
-              <option value="lowShelf">Low shelf</option>
-              <option value="highShelf">High shelf</option>
-              <option value="lowCut">Low cut</option>
-              <option value="highCut">High cut</option>
-            </select>
-          </label>
-
-          <div className="popover-row">
-            <span>Frequency</span>
-            {editingField === 'frequencyHz' ? (
-              <input
-                aria-label="Frequency"
-                className="popover-input"
-                type="number"
-                autoFocus
-                value={editingDraft}
-                onChange={(event) => setEditingDraft(event.target.value)}
-                onBlur={commitEditing}
-                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                  if (event.key === 'Enter') {
-                    commitEditing()
-                  }
-                  if (event.key === 'Escape') {
-                    stopEditing()
-                  }
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                className="popover-value"
-                aria-label="Edit frequency"
-                onDoubleClick={() => startEditing('frequencyHz', popupBand.frequencyHz.toFixed(0))}
-              >
-                {formatFrequencyValue(popupBand.frequencyHz)}
-              </button>
-            )}
-          </div>
-
-          {'gainDb' in popupBand ? (
-            <div className="popover-row">
-              <span>Gain</span>
-              {editingField === 'gainDb' ? (
-                <input
-                  aria-label="Gain"
-                  className="popover-input"
-                  type="number"
-                  autoFocus
-                  step={0.1}
-                  value={editingDraft}
-                  onChange={(event) => setEditingDraft(event.target.value)}
-                  onBlur={commitEditing}
-                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                    if (event.key === 'Enter') {
-                      commitEditing()
-                    }
-                    if (event.key === 'Escape') {
-                      stopEditing()
-                    }
-                  }}
-                />
-              ) : (
+              <div className="band-popover-header">
+                <div>
+                  <p className="section-label">Selected node</p>
+                  <strong>{describeBand(popupBand)}</strong>
+                </div>
                 <button
                   type="button"
-                  className="popover-value"
-                  aria-label="Edit gain"
-                  onDoubleClick={() => startEditing('gainDb', popupBand.gainDb.toFixed(1))}
+                  className="band-popover-close"
+                  aria-label="Delete band"
+                  onClick={() => onBandDelete(popupBand.id)}
                 >
-                  {formatGainValue(popupBand.gainDb)}
+                  x
                 </button>
-              )}
-            </div>
-          ) : null}
+              </div>
 
-          {popupBand.type === 'peaking' ? (
-            <div className="popover-row">
-              <span>Q</span>
-              {editingField === 'q' ? (
-                <input
-                  aria-label="Q"
-                  className="popover-input"
-                  type="number"
-                  autoFocus
-                  step={0.05}
-                  value={editingDraft}
-                  onChange={(event) => setEditingDraft(event.target.value)}
-                  onBlur={commitEditing}
-                  onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                    if (event.key === 'Enter') {
-                      commitEditing()
-                    }
-                    if (event.key === 'Escape') {
-                      stopEditing()
-                    }
-                  }}
-                />
-              ) : (
+              <div className="popover-row">
+                <span>Band bypass</span>
                 <button
                   type="button"
-                  className="popover-value"
-                  aria-label="Edit q"
-                  onDoubleClick={() => startEditing('q', popupBand.q.toFixed(2))}
+                  className={`chip-button ${popupBand.isBypassed ? 'is-active' : ''}`}
+                  aria-pressed={popupBand.isBypassed}
+                  onClick={() => onBandToggleBypass(popupBand.id)}
                 >
-                  {formatQValue(popupBand.q)}
+                  {popupBand.isBypassed ? 'Bypassed' : 'Active'}
                 </button>
-              )}
-            </div>
-          ) : null}
+              </div>
 
-          <div className="popover-row">
-            <span>Slope</span>
-            {editingField === 'slopeDbPerOct' ? (
-              <input
-                aria-label="Slope"
-                className="popover-input"
-                type="number"
-                autoFocus
-                step={
-                  popupBand.type === 'lowCut' || popupBand.type === 'highCut'
-                    ? 12
-                    : 6
-                }
-                value={editingDraft}
-                onChange={(event) => setEditingDraft(event.target.value)}
-                onBlur={commitEditing}
-                onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
-                  if (event.key === 'Enter') {
-                    commitEditing()
+              <label className="popover-row">
+                <span>Type</span>
+                <select
+                  value={popupBand.type}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    commitBand(
+                      onBandCommit,
+                      convertBandType(popupBand, event.target.value as EqBandType),
+                      'immediate',
+                    )
                   }
-                  if (event.key === 'Escape') {
-                    stopEditing()
-                  }
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                className="popover-value"
-                aria-label="Edit slope"
-                onDoubleClick={() =>
-                  startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())
-                }
-              >
-                {popupBand.slopeDbPerOct} dB/oct
-              </button>
-            )}
-          </div>
-        </div>
-      ) : null}
+                >
+                  <option value="peaking">Bell</option>
+                  <option value="lowShelf">Low shelf</option>
+                  <option value="highShelf">High shelf</option>
+                  <option value="lowCut">Low cut</option>
+                  <option value="highCut">High cut</option>
+                </select>
+              </label>
+
+              <div className="popover-row">
+                <span>Frequency</span>
+                {editingField === 'frequencyHz' ? (
+                  <input
+                    aria-label="Frequency"
+                    className="popover-input"
+                    type="number"
+                    autoFocus
+                    value={editingDraft}
+                    onChange={(event) => setEditingDraft(event.target.value)}
+                    onBlur={commitEditing}
+                    onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                      if (event.key === 'Enter') {
+                        commitEditing()
+                      }
+                      if (event.key === 'Escape') {
+                        stopEditing()
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="popover-value"
+                    aria-label="Edit frequency"
+                    onDoubleClick={() =>
+                      startEditing('frequencyHz', popupBand.frequencyHz.toFixed(0))
+                    }
+                  >
+                    {formatFrequencyValue(popupBand.frequencyHz)}
+                  </button>
+                )}
+              </div>
+
+              {'gainDb' in popupBand ? (
+                <div className="popover-row">
+                  <span>Gain</span>
+                  {editingField === 'gainDb' ? (
+                    <input
+                      aria-label="Gain"
+                      className="popover-input"
+                      type="number"
+                      autoFocus
+                      step={0.1}
+                      value={editingDraft}
+                      onChange={(event) => setEditingDraft(event.target.value)}
+                      onBlur={commitEditing}
+                      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                        if (event.key === 'Enter') {
+                          commitEditing()
+                        }
+                        if (event.key === 'Escape') {
+                          stopEditing()
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="popover-value"
+                      aria-label="Edit gain"
+                      onDoubleClick={() => startEditing('gainDb', popupBand.gainDb.toFixed(1))}
+                    >
+                      {formatGainValue(popupBand.gainDb)}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
+              {popupBand.type === 'peaking' ? (
+                <div className="popover-row">
+                  <span>Q</span>
+                  {editingField === 'q' ? (
+                    <input
+                      aria-label="Q"
+                      className="popover-input"
+                      type="number"
+                      autoFocus
+                      step={0.05}
+                      value={editingDraft}
+                      onChange={(event) => setEditingDraft(event.target.value)}
+                      onBlur={commitEditing}
+                      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                        if (event.key === 'Enter') {
+                          commitEditing()
+                        }
+                        if (event.key === 'Escape') {
+                          stopEditing()
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="popover-value"
+                      aria-label="Edit q"
+                      onDoubleClick={() => startEditing('q', popupBand.q.toFixed(2))}
+                    >
+                      {formatQValue(popupBand.q)}
+                    </button>
+                  )}
+                </div>
+              ) : null}
+
+              <div className="popover-row">
+                <span>Slope</span>
+                {editingField === 'slopeDbPerOct' ? (
+                  <input
+                    aria-label="Slope"
+                    className="popover-input"
+                    type="number"
+                    autoFocus
+                    step={
+                      popupBand.type === 'lowCut' || popupBand.type === 'highCut'
+                        ? 12
+                        : 6
+                    }
+                    value={editingDraft}
+                    onChange={(event) => setEditingDraft(event.target.value)}
+                    onBlur={commitEditing}
+                    onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                      if (event.key === 'Enter') {
+                        commitEditing()
+                      }
+                      if (event.key === 'Escape') {
+                        stopEditing()
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="popover-value"
+                    aria-label="Edit slope"
+                    onDoubleClick={() =>
+                      startEditing('slopeDbPerOct', popupBand.slopeDbPerOct.toString())
+                    }
+                  >
+                    {popupBand.slopeDbPerOct} dB/oct
+                  </button>
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

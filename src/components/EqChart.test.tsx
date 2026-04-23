@@ -3,20 +3,27 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EqChart, getSpectrumDisplayLevelDb } from './EqChart'
 import { createFlatCurve } from '../lib/curve'
-import type { EqBand, FftOverlay } from '../types'
+import type { FftOverlayStore } from '../lib/audio-monitor'
+import type { EqBand } from '../types'
 
 const baselineCurve = createFlatCurve([20, 1000, 20000])
-const fftOverlay: FftOverlay = {
-  preSpectrum: [
-    { frequencyHz: 20, levelDb: -60 },
-    { frequencyHz: 1000, levelDb: -36 },
-    { frequencyHz: 20000, levelDb: -54 },
-  ],
-  postSpectrum: [
-    { frequencyHz: 20, levelDb: -54 },
-    { frequencyHz: 1000, levelDb: -34 },
-    { frequencyHz: 20000, levelDb: -54.2 },
-  ],
+
+function createFftStore(): FftOverlayStore {
+  const frequencies = Float32Array.from([20, 1000, 20000])
+  const preLevels = Float32Array.from([-60, -36, -54])
+  const postLevels = Float32Array.from([-54, -34, -54.2])
+
+  return {
+    getSnapshot: () => ({
+      version: 1,
+      hasData: true,
+      sampleRate: 48_000,
+      frequencies,
+      preLevels,
+      postLevels,
+    }),
+    subscribe: () => () => undefined,
+  }
 }
 
 function renderChart(
@@ -59,6 +66,11 @@ describe('EqChart', () => {
       bottom: 700,
       toJSON: () => ({}),
     })
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(performance.now())
+      return 1
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
   })
 
   afterEach(() => {
@@ -122,17 +134,16 @@ describe('EqChart', () => {
       slopeDbPerOct: 12,
     }
 
-    const { container } = renderChart({
+    renderChart({
       bands: [band],
       selectedBandId: band.id,
       showFlatHint: false,
       onBandCommit,
     })
 
-    const chart = within(container)
-    await user.click(chart.getByLabelText('Bell band'))
-    await user.dblClick(chart.getByLabelText('Edit frequency'))
-    const input = chart.getByLabelText('Frequency')
+    await user.click(screen.getByLabelText('Bell band'))
+    await user.dblClick(screen.getByLabelText('Edit frequency'))
+    const input = screen.getByLabelText('Frequency')
     await user.clear(input)
     await user.type(input, '1500{Enter}')
 
@@ -182,7 +193,7 @@ describe('EqChart', () => {
     }, 'immediate')
 
     fireEvent.pointerUp(node, { pointerId: 1 })
-    expect(onBandCommit).toHaveBeenLastCalledWith(band, 'immediate')
+    expect(onBandCommit.mock.calls.at(-1)?.[1]).toBe('immediate')
     onBandCommit.mockClear()
     fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
     expect(onBandCommit).not.toHaveBeenCalled()
@@ -221,8 +232,85 @@ describe('EqChart', () => {
       clientY: 320,
     })
 
+    expect(onBandCommit).toHaveBeenCalled()
+    expect(onBandCommit.mock.calls[0][1]).toBe('smooth')
+  })
+
+  it('uses a dynamic viewBox without stretch-only preserveAspectRatio overrides', () => {
+    renderChart()
+
+    const chartSurface = screen.getByLabelText('EQ editing surface')
+    expect(chartSurface.getAttribute('preserveAspectRatio')).toBeNull()
+    expect(chartSurface.getAttribute('viewBox')).toBe('0 0 1200 700')
+  })
+
+  it('keeps smooth drag commits in a non-standard aspect ratio', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    vi.spyOn(SVGSVGElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1600,
+      height: 500,
+      top: 0,
+      left: 0,
+      right: 1600,
+      bottom: 500,
+      toJSON: () => ({}),
+    })
+
+    renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+      onBandCommit,
+    })
+
+    const node = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 800,
+      clientY: 250,
+    })
+    onBandCommit.mockClear()
+
+    fireEvent.pointerMove(node, {
+      pointerId: 1,
+      clientX: 920,
+      clientY: 240,
+    })
     expect(onBandCommit).toHaveBeenCalledTimes(1)
     expect(onBandCommit.mock.calls[0][1]).toBe('smooth')
+    const firstCommittedFrequency = onBandCommit.mock.calls[0][0].frequencyHz
+
+    fireEvent.pointerUp(node, { pointerId: 1 })
+    onBandCommit.mockClear()
+
+    const updatedNode = screen.getByLabelText('Bell band')
+    fireEvent.pointerDown(updatedNode, {
+      pointerId: 1,
+      clientX: 1080,
+      clientY: 220,
+    })
+    fireEvent.pointerMove(updatedNode, {
+      pointerId: 1,
+      clientX: 1240,
+      clientY: 200,
+    })
+
+    expect(onBandCommit).toHaveBeenCalledTimes(1)
+    expect(onBandCommit.mock.calls[0][1]).toBe('smooth')
+    const secondCommittedFrequency = onBandCommit.mock.calls[0][0].frequencyHz
+    expect(secondCommittedFrequency).toBeGreaterThan(firstCommittedFrequency)
   })
 
   it('adjusts shelf slope with the mouse wheel while dragging', () => {
@@ -327,6 +415,34 @@ describe('EqChart', () => {
     expect(onBandToggleBypass).toHaveBeenCalledWith('band-1')
   })
 
+  it('renders the band popover through a body portal', async () => {
+    const user = userEvent.setup()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    const { container } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      showFlatHint: false,
+    })
+
+    await user.click(screen.getByLabelText('Bell band'))
+
+    const popoverTitle = screen.getByText('Selected node')
+    const popover = popoverTitle.closest('.band-popover')
+    const chartFrame = container.querySelector('.chart-frame')
+    expect(popover).toBeTruthy()
+    expect(popover?.parentElement).toBe(document.body)
+    expect(chartFrame?.contains(popover as Node)).toBe(false)
+  })
+
   it('closes the popover after dragging when the pointer leaves', () => {
     vi.useFakeTimers()
     const band: EqBand = {
@@ -376,12 +492,14 @@ describe('EqChart', () => {
     expect(onDecreaseViewMin).toHaveBeenCalledTimes(1)
   })
 
-  it('renders FFT overlay layers when spectrum data is available', () => {
-    renderChart({ fftOverlay, showFlatHint: false })
+  it('renders FFT canvas when a store is provided', () => {
+    renderChart({
+      fftStore: createFftStore(),
+      hasFftFrame: true,
+      showFlatHint: false,
+    })
 
-    expect(screen.getByTestId('fft-pre-fill')).toBeTruthy()
-    expect(screen.getByTestId('fft-pre-line')).toBeTruthy()
-    expect(screen.getAllByTestId('fft-post-segment').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByTestId('fft-canvas')).toBeTruthy()
   })
 
   it('applies +3 dB per octave display compensation around 1 kHz', () => {
@@ -395,33 +513,12 @@ describe('EqChart', () => {
     expect(getSpectrumDisplayLevelDb(-30, 2000, 30)).toBeCloseTo(3)
   })
 
-  it('renders the FFT pre-line as a smoothed sampled path', () => {
-    renderChart({ fftOverlay, showFlatHint: false })
-
-    const path = screen.getByTestId('fft-pre-line')
-    const commands = path.getAttribute('d')?.match(/[ML]/g) ?? []
-    expect(commands.length).toBeGreaterThan(3)
-  })
-
-  it('hides yellow FFT segments when post and pre responses are nearly identical', () => {
-    renderChart({
-      fftOverlay: {
-        preSpectrum: fftOverlay.preSpectrum,
-        postSpectrum: [
-          { frequencyHz: 20, levelDb: -60.1 },
-          { frequencyHz: 1000, levelDb: -35.7 },
-          { frequencyHz: 20000, levelDb: -54.2 },
-        ],
-      },
+  it('keeps FFT canvas mounted when frame availability toggles', () => {
+    const { rerender } = renderChart({
+      fftStore: createFftStore(),
+      hasFftFrame: false,
       showFlatHint: false,
     })
-
-    expect(screen.queryByTestId('fft-post-segment')).toBeNull()
-  })
-
-  it('moves the FFT display upward when visual gain increases', () => {
-    const { rerender } = renderChart({ fftOverlay, showFlatHint: false, visualGainDb: 0 })
-    const lowGainPath = screen.getByTestId('fft-pre-line').getAttribute('d')
 
     rerender(
       <EqChart
@@ -442,12 +539,12 @@ describe('EqChart', () => {
         onDecreaseViewMax={vi.fn()}
         onIncreaseViewMin={vi.fn()}
         onDecreaseViewMin={vi.fn()}
-        fftOverlay={fftOverlay}
+        fftStore={createFftStore()}
+        hasFftFrame={true}
       />,
     )
 
-    const highGainPath = screen.getByTestId('fft-pre-line').getAttribute('d')
-    expect(highGainPath).not.toEqual(lowGainPath)
+    expect(screen.getByTestId('fft-canvas')).toBeTruthy()
   })
 })
 

@@ -1,4 +1,5 @@
-import { renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { StrictMode, createElement, type ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FFT_ANALYSER_MAX_DB,
@@ -104,6 +105,7 @@ let lastCreatedContext: FakeAudioContext | null = null
 class HookFakeAudioContext extends FakeAudioContext {
   constructor() {
     super()
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     lastCreatedContext = this
   }
 
@@ -385,5 +387,151 @@ describe('audio monitor graph', () => {
 
     expect(spectrum[0]).toEqual({ frequencyHz: 6_000, levelDb: -18 })
     expect(spectrum[1]).toEqual({ frequencyHz: 12_000, levelDb: -90 })
+  })
+})
+
+function createAudioElementHarness() {
+  const element = document.createElement('audio')
+  let paused = true
+  let ended = false
+
+  Object.defineProperty(element, 'paused', {
+    configurable: true,
+    get: () => paused,
+  })
+  Object.defineProperty(element, 'ended', {
+    configurable: true,
+    get: () => ended,
+  })
+
+  return {
+    element,
+    play() {
+      paused = false
+      ended = false
+      element.dispatchEvent(new Event('play'))
+    },
+    pause() {
+      paused = true
+      element.dispatchEvent(new Event('pause'))
+    },
+    end() {
+      paused = true
+      ended = true
+      element.dispatchEvent(new Event('ended'))
+    },
+  }
+}
+
+const StrictModeWrapper = ({ children }: { children: ReactNode }) =>
+  createElement(StrictMode, null, children)
+
+describe('useEqPlaybackMonitor StrictMode lifecycle', () => {
+  afterEach(() => {
+    lastCreatedContext = null
+    vi.restoreAllMocks()
+  })
+
+  it('produces FFT frames after play in StrictMode', async () => {
+    const rafCallbacks = new Map<number, FrameRequestCallback>()
+    let rafId = 0
+
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      rafId += 1
+      rafCallbacks.set(rafId, callback)
+      return rafId
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      rafCallbacks.delete(id)
+    })
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: HookFakeAudioContext,
+    })
+
+    const audio = createAudioElementHarness()
+    const { result } = renderHook(
+      () =>
+        useEqPlaybackMonitor({
+          audioElement: audio.element,
+          bands: [],
+          baselineCurve,
+          monitorBypassed: false,
+          monitorBaselineEnabled: false,
+          preGainDb: -8,
+        }),
+      { wrapper: StrictModeWrapper },
+    )
+
+    act(() => {
+      audio.play()
+    })
+
+    await waitFor(() => {
+      expect(result.current.hasFftFrame).toBe(true)
+    })
+    expect(rafCallbacks.size).toBeGreaterThan(0)
+  })
+
+  it('stops sampling on pause or ended, then can restart on play', async () => {
+    let rafId = 0
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => {
+      rafId += 1
+      return rafId
+    })
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: HookFakeAudioContext,
+    })
+
+    const audio = createAudioElementHarness()
+    const { result } = renderHook(
+      () =>
+        useEqPlaybackMonitor({
+          audioElement: audio.element,
+          bands: [],
+          baselineCurve,
+          monitorBypassed: false,
+          monitorBaselineEnabled: false,
+          preGainDb: -8,
+        }),
+      { wrapper: StrictModeWrapper },
+    )
+
+    act(() => {
+      audio.play()
+    })
+    await waitFor(() => {
+      expect(result.current.hasFftFrame).toBe(true)
+    })
+
+    act(() => {
+      audio.pause()
+    })
+    await waitFor(() => {
+      expect(result.current.hasFftFrame).toBe(false)
+    })
+
+    act(() => {
+      audio.play()
+    })
+    await waitFor(() => {
+      expect(result.current.hasFftFrame).toBe(true)
+    })
+
+    act(() => {
+      audio.end()
+    })
+    await waitFor(() => {
+      expect(result.current.hasFftFrame).toBe(false)
+    })
+
+    act(() => {
+      audio.play()
+    })
+    await waitFor(() => {
+      expect(result.current.hasFftFrame).toBe(true)
+    })
   })
 })

@@ -1,12 +1,6 @@
-import {
-  startTransition,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createLogFrequencyGrid } from './curve'
-import type { CurvePoint, EqBand, FftOverlay, SpectrumPoint } from '../types'
+import type { CurvePoint, EqBand, SpectrumPoint } from '../types'
 
 const CUT_Q = Math.SQRT1_2
 const GRAPH_EQ_Q = 4.318
@@ -74,8 +68,29 @@ type FilterDescriptor = {
 }
 
 type SpectrumBuffers = {
-  pre: Float32Array<ArrayBuffer>
-  post: Float32Array<ArrayBuffer>
+  pre: Float32Array
+  post: Float32Array
+}
+
+type FftStoreListener = () => void
+
+export type FftFrameSnapshot = {
+  version: number
+  hasData: boolean
+  sampleRate: number
+  frequencies: Float32Array
+  preLevels: Float32Array
+  postLevels: Float32Array
+}
+
+export type FftOverlayStore = {
+  getSnapshot: () => FftFrameSnapshot
+  subscribe: (listener: FftStoreListener) => () => void
+}
+
+type MutableFftOverlayStore = FftOverlayStore & {
+  publish: (sampleRate: number, buffers: SpectrumBuffers) => void
+  clear: () => void
 }
 
 function getAudioContextConstructor() {
@@ -137,21 +152,95 @@ function interpolateFrequencyLevelDb(
   return leftValue + (rightValue - leftValue) * blend
 }
 
-function createRawSpectrumTrace(
+function fillSpectrumLevels(
   frequencyData: Float32Array,
   nyquistHz: number,
-  frequencies: number[],
+  frequencies: Float32Array,
   floorDb: number,
+  targetLevels: Float32Array,
 ) {
-  return frequencies.map((frequencyHz) => ({
-    frequencyHz,
-    levelDb: interpolateFrequencyLevelDb(
+  if (frequencyData.length === 0 || nyquistHz <= 0) {
+    targetLevels.fill(floorDb)
+    return
+  }
+
+  for (let index = 0; index < frequencies.length; index += 1) {
+    targetLevels[index] = interpolateFrequencyLevelDb(
       frequencyData,
       nyquistHz,
-      frequencyHz,
+      frequencies[index],
       floorDb,
-    ),
-  }))
+    )
+  }
+}
+
+function createFftOverlayStore(frequencies: number[]): MutableFftOverlayStore {
+  const frequenciesBuffer = Float32Array.from(frequencies)
+  const preLevels = new Float32Array(frequenciesBuffer.length)
+  const postLevels = new Float32Array(frequenciesBuffer.length)
+  const listeners = new Set<FftStoreListener>()
+  let snapshot: FftFrameSnapshot = {
+    version: 0,
+    hasData: false,
+    sampleRate: 0,
+    frequencies: frequenciesBuffer,
+    preLevels,
+    postLevels,
+  }
+
+  function notify() {
+    listeners.forEach((listener) => listener())
+  }
+
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    publish: (sampleRate, buffers) => {
+      const nyquistHz = sampleRate / 2
+      fillSpectrumLevels(
+        buffers.pre,
+        nyquistHz,
+        frequenciesBuffer,
+        FFT_ANALYSER_MIN_DB,
+        preLevels,
+      )
+      fillSpectrumLevels(
+        buffers.post,
+        nyquistHz,
+        frequenciesBuffer,
+        FFT_ANALYSER_MIN_DB,
+        postLevels,
+      )
+
+      snapshot = {
+        ...snapshot,
+        version: snapshot.version + 1,
+        hasData: true,
+        sampleRate,
+      }
+      notify()
+    },
+    clear: () => {
+      if (!snapshot.hasData && snapshot.version === 0) {
+        return
+      }
+
+      preLevels.fill(FFT_ANALYSER_MIN_DB)
+      postLevels.fill(FFT_ANALYSER_MIN_DB)
+      snapshot = {
+        ...snapshot,
+        version: snapshot.version + 1,
+        hasData: false,
+        sampleRate: 0,
+      }
+      notify()
+    },
+  }
 }
 
 function sampleCurveGain(curve: CurvePoint[], frequencyHz: number) {
@@ -425,19 +514,19 @@ export function mapFrequencyDataToSpectrum(
   frequencies = FFT_OVERLAY_FREQUENCIES,
   floorDb = FFT_ANALYSER_MIN_DB,
 ): SpectrumPoint[] {
-  if (frequencyData.length === 0 || nyquistHz <= 0) {
-    return frequencies.map((frequencyHz) => ({
-      frequencyHz,
-      levelDb: floorDb,
-    }))
-  }
-
-  return createRawSpectrumTrace(
+  const frequencyBuffer = Float32Array.from(frequencies)
+  const levels = new Float32Array(frequencyBuffer.length)
+  fillSpectrumLevels(
     frequencyData,
     nyquistHz,
-    frequencies,
+    frequencyBuffer,
     floorDb,
+    levels,
   )
+  return frequencies.map((frequencyHz, index) => ({
+    frequencyHz,
+    levelDb: levels[index],
+  }))
 }
 
 function ensureSpectrumBuffers(
@@ -457,22 +546,6 @@ function ensureSpectrumBuffers(
   }
 
   return buffers
-}
-
-function readFftOverlay(
-  graph: MonitorGraph,
-  sampleRate: number,
-  buffers: SpectrumBuffers,
-): FftOverlay {
-  graph.preAnalyser.getFloatFrequencyData(buffers.pre)
-  graph.postAnalyser.getFloatFrequencyData(buffers.post)
-
-  const nyquistHz = sampleRate / 2
-
-  return {
-    preSpectrum: mapFrequencyDataToSpectrum(buffers.pre, nyquistHz),
-    postSpectrum: mapFrequencyDataToSpectrum(buffers.post, nyquistHz),
-  }
 }
 
 export function useEqPlaybackMonitor({
@@ -495,21 +568,37 @@ export function useEqPlaybackMonitor({
   const attachedElementRef = useRef<HTMLAudioElement | null>(null)
   const spectrumBuffersRef = useRef<SpectrumBuffers | null>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const isSamplingRef = useRef(false)
+  const isDisposedRef = useRef(false)
+  const hasFftFrameRef = useRef(false)
+  const sampleFftOverlayRef = useRef<() => void>(() => undefined)
+  const fftStoreRef = useRef<MutableFftOverlayStore | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [fftOverlay, setFftOverlay] = useState<FftOverlay | null>(null)
+  const [hasFftFrame, setHasFftFrame] = useState(false)
 
-  const clearFftOverlay = useEffectEvent(() => {
+  if (!fftStoreRef.current) {
+    fftStoreRef.current = createFftOverlayStore(FFT_OVERLAY_FREQUENCIES)
+  }
+
+  const stopFftOverlay = useCallback(() => {
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current)
       animationFrameRef.current = null
     }
 
-    startTransition(() => {
-      setFftOverlay(null)
-    })
-  })
+    isSamplingRef.current = false
+    fftStoreRef.current?.clear()
+    if (hasFftFrameRef.current) {
+      hasFftFrameRef.current = false
+      setHasFftFrame(false)
+    }
+  }, [])
 
-  const sampleFftOverlay = useEffectEvent(() => {
+  sampleFftOverlayRef.current = () => {
+    if (isDisposedRef.current) {
+      return
+    }
+
     const context = audioContextRef.current
     const graph = graphRef.current
     const attachedElement = attachedElementRef.current
@@ -521,7 +610,7 @@ export function useEqPlaybackMonitor({
       attachedElement.paused ||
       attachedElement.ended
     ) {
-      clearFftOverlay()
+      stopFftOverlay()
       return
     }
 
@@ -530,24 +619,32 @@ export function useEqPlaybackMonitor({
       graph,
     )
 
-    const nextOverlay = readFftOverlay(
-      graph,
-      context.sampleRate,
-      spectrumBuffersRef.current,
+    graph.preAnalyser.getFloatFrequencyData(
+      spectrumBuffersRef.current.pre as Float32Array<ArrayBuffer>,
     )
+    graph.postAnalyser.getFloatFrequencyData(
+      spectrumBuffersRef.current.post as Float32Array<ArrayBuffer>,
+    )
+    fftStoreRef.current?.publish(context.sampleRate, spectrumBuffersRef.current)
 
-    startTransition(() => {
-      setFftOverlay(nextOverlay)
-    })
+    if (!hasFftFrameRef.current) {
+      hasFftFrameRef.current = true
+      setHasFftFrame(true)
+    }
 
-    animationFrameRef.current = requestAnimationFrame(sampleFftOverlay)
-  })
+    animationFrameRef.current = requestAnimationFrame(sampleFftOverlayRef.current)
+  }
 
-  const startFftOverlay = useEffectEvent(() => {
+  const startFftOverlay = useCallback(() => {
+    if (isDisposedRef.current) {
+      return
+    }
+
     const context = audioContextRef.current
+    const graph = graphRef.current
     const attachedElement = attachedElementRef.current
 
-    if (!context || !attachedElement || attachedElement.paused) {
+    if (!context || !graph || !attachedElement || attachedElement.paused) {
       return
     }
 
@@ -555,15 +652,20 @@ export function useEqPlaybackMonitor({
       void context.resume()
     }
 
-    if (animationFrameRef.current !== null) {
+    if (isSamplingRef.current) {
       return
     }
 
-    sampleFftOverlay()
-  })
+    isSamplingRef.current = true
+    sampleFftOverlayRef.current()
+  }, [])
 
   useEffect(() => {
-    if (!audioElement || attachedElementRef.current === audioElement) {
+    if (!audioElement) {
+      return
+    }
+
+    if (attachedElementRef.current === audioElement && graphRef.current) {
       return
     }
 
@@ -574,6 +676,12 @@ export function useEqPlaybackMonitor({
     }
 
     try {
+      stopFftOverlay()
+
+      if (graphRef.current && attachedElementRef.current) {
+        disconnectMonitorGraph(graphRef.current)
+      }
+
       const context = audioContextRef.current ?? new ContextConstructor()
       const graph = createMonitorGraph(context, audioElement)
 
@@ -582,7 +690,6 @@ export function useEqPlaybackMonitor({
       attachedElementRef.current = audioElement
       spectrumBuffersRef.current = null
       setErrorMessage(null)
-      setFftOverlay(null)
       syncMonitorGraph(
         context,
         graph,
@@ -611,7 +718,7 @@ export function useEqPlaybackMonitor({
           : 'Failed to initialize the monitor audio graph.'
       setErrorMessage(message)
     }
-  }, [audioElement])
+  }, [audioElement, stopFftOverlay])
 
   useEffect(() => {
     const context = audioContextRef.current
@@ -634,8 +741,10 @@ export function useEqPlaybackMonitor({
   }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed, preGainDb])
 
   useEffect(() => {
+    isDisposedRef.current = false
+
     if (!audioElement) {
-      clearFftOverlay()
+      stopFftOverlay()
       return
     }
 
@@ -643,7 +752,7 @@ export function useEqPlaybackMonitor({
       startFftOverlay()
     }
     const handleStop = () => {
-      clearFftOverlay()
+      stopFftOverlay()
     }
 
     audioElement.addEventListener('play', handlePlay)
@@ -660,13 +769,16 @@ export function useEqPlaybackMonitor({
       audioElement.removeEventListener('pause', handleStop)
       audioElement.removeEventListener('ended', handleStop)
       audioElement.removeEventListener('emptied', handleStop)
-      clearFftOverlay()
+      stopFftOverlay()
     }
-  }, [audioElement, clearFftOverlay, startFftOverlay])
+  }, [audioElement, startFftOverlay, stopFftOverlay])
 
   useEffect(() => {
+    isDisposedRef.current = false
+
     return () => {
-      clearFftOverlay()
+      isDisposedRef.current = true
+      stopFftOverlay()
 
       const graph = graphRef.current
       if (graph) {
@@ -677,10 +789,11 @@ export function useEqPlaybackMonitor({
         void audioContextRef.current.close()
       }
     }
-  }, [])
+  }, [stopFftOverlay])
 
   return {
     errorMessage,
-    fftOverlay,
+    fftStore: fftStoreRef.current as FftOverlayStore,
+    hasFftFrame,
   }
 }
