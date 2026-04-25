@@ -79,4 +79,13 @@ describe('App monitor controls', () => {
 
     expect(clickSpy).toHaveBeenCalledTimes(1)
   })
+
+  it('renders custom monitor player controls instead of native audio controls', () => {
+    render(<App />)
+
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy()
+    expect(screen.getByLabelText('Monitor position')).toBeTruthy()
+    expect(screen.getByLabelText('Monitor volume')).toBeTruthy()
+    expect(document.querySelector('audio[controls]')).toBeNull()
+  })
 })

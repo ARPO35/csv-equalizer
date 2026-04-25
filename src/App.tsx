@@ -28,6 +28,16 @@ function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
 }
 
+function formatTime(totalSeconds: number) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return '0:00'
+  }
+
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = Math.floor(totalSeconds % 60)
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
 function EditorShell() {
   const curveInputRef = useRef<HTMLInputElement | null>(null)
   const audioInputRef = useRef<HTMLInputElement | null>(null)
@@ -42,6 +52,10 @@ function EditorShell() {
   const [visualGainDraft, setVisualGainDraft] = useState('')
   const [isEditingGridPoints, setIsEditingGridPoints] = useState(false)
   const [gridPointDraft, setGridPointDraft] = useState('')
+  const [monitorDurationSec, setMonitorDurationSec] = useState(0)
+  const [monitorCurrentTimeSec, setMonitorCurrentTimeSec] = useState(0)
+  const [monitorVolume, setMonitorVolume] = useState(1)
+  const [isMonitorPlaying, setIsMonitorPlaying] = useState(false)
   const { appliedBands, flushAppliedBands, markNextBandChange } = useAppliedBands(
     state.bands,
   )
@@ -230,6 +244,94 @@ function EditorShell() {
     audioElement.src = audioObjectUrlRef.current
     audioElement.load()
   }, [audioElement])
+
+  useEffect(() => {
+    if (!audioElement) {
+      return
+    }
+
+    const syncFromElement = () => {
+      const nextDuration = Number.isFinite(audioElement.duration) ? audioElement.duration : 0
+      const nextTime = Number.isFinite(audioElement.currentTime) ? audioElement.currentTime : 0
+      const nextVolume = Number.isFinite(audioElement.volume) ? audioElement.volume : 1
+      setMonitorDurationSec(Math.max(0, nextDuration))
+      setMonitorCurrentTimeSec(Math.max(0, nextTime))
+      setMonitorVolume(Math.min(1, Math.max(0, nextVolume)))
+      setIsMonitorPlaying(!audioElement.paused && !audioElement.ended)
+    }
+
+    syncFromElement()
+    const events = [
+      'loadedmetadata',
+      'durationchange',
+      'timeupdate',
+      'play',
+      'pause',
+      'ended',
+      'volumechange',
+    ] as const
+    for (const eventName of events) {
+      audioElement.addEventListener(eventName, syncFromElement)
+    }
+
+    return () => {
+      for (const eventName of events) {
+        audioElement.removeEventListener(eventName, syncFromElement)
+      }
+    }
+  }, [audioElement])
+
+  async function handleToggleMonitorPlayback() {
+    if (!audioElement) {
+      return
+    }
+
+    if (!state.audioFileName) {
+      handleAudioUploadClick()
+      return
+    }
+
+    if (audioElement.paused) {
+      try {
+        await audioElement.play()
+      } catch {
+        // Ignore autoplay/user-gesture failures and keep UI responsive.
+      }
+      return
+    }
+
+    audioElement.pause()
+  }
+
+  function handleMonitorSeekChange(event: ChangeEvent<HTMLInputElement>) {
+    if (!audioElement || monitorDurationSec <= 0) {
+      return
+    }
+
+    const nextTime = Number(event.target.value)
+    if (Number.isNaN(nextTime)) {
+      return
+    }
+
+    const boundedTime = Math.min(monitorDurationSec, Math.max(0, nextTime))
+    audioElement.currentTime = boundedTime
+    setMonitorCurrentTimeSec(boundedTime)
+  }
+
+  function handleMonitorVolumeChange(event: ChangeEvent<HTMLInputElement>) {
+    if (!audioElement) {
+      return
+    }
+
+    const nextVolume = Number(event.target.value)
+    if (Number.isNaN(nextVolume)) {
+      return
+    }
+
+    const boundedVolume = Math.min(1, Math.max(0, nextVolume))
+    audioElement.volume = boundedVolume
+    setMonitorVolume(boundedVolume)
+  }
 
   function updateBand(nextBand: EqBand, mode: BandUpdateMode) {
     const currentBand = state.bands.find((band) => band.id === nextBand.id)
@@ -454,12 +556,45 @@ function EditorShell() {
                 </p>
               </button>
 
-              <audio
-                ref={setAudioElement}
-                className="monitor-player"
-                controls
-                preload="metadata"
-              />
+              <div className="monitor-player-shell">
+                <div className="monitor-player-header">
+                  <button
+                    type="button"
+                    className={`chip-button monitor-play-toggle ${isMonitorPlaying ? 'is-active' : ''}`}
+                    onClick={() => void handleToggleMonitorPlayback()}
+                  >
+                    {isMonitorPlaying ? 'Pause' : 'Play'}
+                  </button>
+                  <div className="monitor-time-readout">
+                    {formatTime(monitorCurrentTimeSec)} / {formatTime(monitorDurationSec)}
+                  </div>
+                  <label className="monitor-volume-control">
+                    <span>Vol</span>
+                    <input
+                      aria-label="Monitor volume"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={monitorVolume}
+                      onChange={handleMonitorVolumeChange}
+                    />
+                  </label>
+                </div>
+                <input
+                  className="monitor-seek"
+                  aria-label="Monitor position"
+                  type="range"
+                  min={0}
+                  max={monitorDurationSec > 0 ? monitorDurationSec : 0}
+                  step={0.01}
+                  value={monitorDurationSec > 0 ? Math.min(monitorCurrentTimeSec, monitorDurationSec) : 0}
+                  disabled={!state.audioFileName || monitorDurationSec <= 0}
+                  onChange={handleMonitorSeekChange}
+                />
+              </div>
+
+              <audio ref={setAudioElement} className="monitor-player" preload="metadata" />
             </div>
           </section>
 
