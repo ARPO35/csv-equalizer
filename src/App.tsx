@@ -232,11 +232,11 @@ function EditorShell() {
   }, [audioElement])
 
   function updateBand(nextBand: EqBand, mode: BandUpdateMode) {
-    markNextBandChange(mode)
-
     const currentBand = state.bands.find((band) => band.id === nextBand.id)
     if (currentBand === nextBand) {
-      flushAppliedBands()
+      if (mode === 'immediate') {
+        flushAppliedBands()
+      }
       return
     }
 
@@ -252,10 +252,13 @@ function EditorShell() {
       ('q' in currentBand ? currentBand.q : undefined) ===
         ('q' in nextBand ? nextBand.q : undefined)
     ) {
-      flushAppliedBands()
+      if (mode === 'immediate') {
+        flushAppliedBands()
+      }
       return
     }
 
+    markNextBandChange(mode)
     dispatch({ type: 'update-band', payload: nextBand })
   }
 

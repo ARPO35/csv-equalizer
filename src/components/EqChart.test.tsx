@@ -229,6 +229,11 @@ describe('EqChart', () => {
 
     expect(onBandCommit).toHaveBeenCalled()
     expect(onBandCommit.mock.calls[0][1]).toBe('smooth')
+
+    onBandCommit.mockClear()
+    fireEvent.pointerUp(node, { pointerId: 1 })
+    expect(onBandCommit).toHaveBeenCalled()
+    expect(onBandCommit.mock.calls.at(-1)?.[1]).toBe('smooth')
   })
 
   it('uses a dynamic viewBox without stretch-only preserveAspectRatio overrides', () => {

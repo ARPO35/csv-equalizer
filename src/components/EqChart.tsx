@@ -646,6 +646,7 @@ export function EqChart({
   const dragCommitFrameRef = useRef<number | null>(null)
   const pendingDragBandRef = useRef<EqBand | null>(null)
   const draggingBandRef = useRef<EqBand | null>(null)
+  const didDragPointChangeRef = useRef(false)
   const onBandCommitRef = useRef(onBandCommit)
   const [draggingBandId, setDraggingBandId] = useState<string | null>(null)
   const [hoveredBandId, setHoveredBandId] = useState<string | null>(null)
@@ -790,7 +791,23 @@ export function EqChart({
     return viewMaxDb - ratio * (viewMaxDb - viewMinDb)
   }
 
-  function handlePointerMove(event: PointerEvent<SVGCircleElement>, band: EqBand) {
+  function hasBandPointValueChanged(leftBand: EqBand, rightBand: EqBand) {
+    if (leftBand.frequencyHz !== rightBand.frequencyHz) {
+      return true
+    }
+
+    if ('gainDb' in leftBand && 'gainDb' in rightBand) {
+      return leftBand.gainDb !== rightBand.gainDb
+    }
+
+    return false
+  }
+
+  function handlePointerMove(
+    event: PointerEvent<SVGCircleElement>,
+    band: EqBand,
+    shouldTrackDragChange = true,
+  ) {
     if (draggingBandId !== band.id) {
       return
     }
@@ -811,6 +828,14 @@ export function EqChart({
             ...band,
             frequencyHz: clampFrequency(getFrequencyFromX(point.x)),
           }
+
+    if (!hasBandPointValueChanged(nextBand, band)) {
+      return
+    }
+
+    if (shouldTrackDragChange) {
+      didDragPointChangeRef.current = true
+    }
 
     pendingDragBandRef.current = nextBand
     if (dragCommitFrameRef.current !== null) {
@@ -1110,18 +1135,23 @@ export function EqChart({
                 clearHoverTimer()
                 setHoveredBandId(band.id)
                 setDraggingBandId(band.id)
+                didDragPointChangeRef.current = false
                 if ('setPointerCapture' in event.currentTarget) {
                   event.currentTarget.setPointerCapture(event.pointerId)
                 }
-                handlePointerMove(event, band)
+                handlePointerMove(event, band, false)
               }}
               onPointerMove={(event) => handlePointerMove(event, band)}
               onPointerUp={(event) => {
                 setDraggingBandId(null)
-                const committedBand = flushPendingDragCommit('immediate')
+                const releaseMode: BandUpdateMode = didDragPointChangeRef.current
+                  ? 'smooth'
+                  : 'immediate'
+                const committedBand = flushPendingDragCommit(releaseMode)
                 if (!committedBand && draggingBandRef.current) {
-                  commitBand(onBandCommitRef.current, draggingBandRef.current, 'immediate')
+                  commitBand(onBandCommitRef.current, draggingBandRef.current, releaseMode)
                 }
+                didDragPointChangeRef.current = false
                 if (
                   'hasPointerCapture' in event.currentTarget &&
                   event.currentTarget.hasPointerCapture(event.pointerId)
@@ -1132,6 +1162,7 @@ export function EqChart({
               onPointerCancel={() => {
                 flushPendingDragCommit('immediate')
                 setDraggingBandId(null)
+                didDragPointChangeRef.current = false
               }}
             />
           </g>
