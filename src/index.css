@@ -26,6 +26,15 @@
   --curve-preview: #d2ff72;
   --curve-fft-pre: #ffffff;
   --curve-fft-post: #ffd34d;
+  --toast-info-bg: rgba(19, 21, 27, 0.97);
+  --toast-info-border: rgba(123, 136, 160, 0.35);
+  --toast-info-text: #f1f5ff;
+  --toast-warning-bg: rgba(62, 45, 8, 0.96);
+  --toast-warning-border: rgba(255, 205, 98, 0.45);
+  --toast-warning-text: #ffe6aa;
+  --toast-error-bg: rgba(61, 14, 12, 0.96);
+  --toast-error-border: rgba(255, 127, 117, 0.45);
+  --toast-error-text: #ffd6d1;
 }
 
 * {
