@@ -242,6 +242,21 @@
   gap: 0.7rem;
 }
 
+.monitor-toggle-row {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.monitor-toggle-row .chip-button {
+  width: 100%;
+  min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .monitor-actions {
   display: flex;
   flex-wrap: wrap;

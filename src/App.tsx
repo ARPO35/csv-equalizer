@@ -419,28 +419,30 @@ function EditorShell() {
         <aside className="panel panel-monitor">
           <section className="panel-section">
             <p className="section-label">Monitor</p>
+            <div className="monitor-toggle-row">
+              <button
+                type="button"
+                className={`chip-button ${state.monitorBaselineEnabled ? 'is-active' : ''}`}
+                aria-pressed={state.monitorBaselineEnabled}
+                disabled={!state.sourceFileName}
+                onClick={() => dispatch({ type: 'toggle-monitor-baseline' })}
+              >
+                Baseline monitor
+              </button>
+              <button
+                type="button"
+                className={`chip-button ${state.monitorBypassed ? 'is-active' : ''}`}
+                aria-pressed={state.monitorBypassed}
+                disabled={!state.audioFileName}
+                onClick={() => dispatch({ type: 'toggle-monitor-bypass' })}
+              >
+                Monitor bypass
+              </button>
+            </div>
             <div className="monitor-stack">
               <div className="monitor-actions">
                 <button type="button" className="ghost-button" onClick={handleAudioUploadClick}>
                   Upload audio
-                </button>
-                <button
-                  type="button"
-                  className={`chip-button ${state.monitorBaselineEnabled ? 'is-active' : ''}`}
-                  aria-pressed={state.monitorBaselineEnabled}
-                  disabled={!state.sourceFileName}
-                  onClick={() => dispatch({ type: 'toggle-monitor-baseline' })}
-                >
-                  Baseline monitor
-                </button>
-                <button
-                  type="button"
-                  className={`chip-button ${state.monitorBypassed ? 'is-active' : ''}`}
-                  aria-pressed={state.monitorBypassed}
-                  disabled={!state.audioFileName}
-                  onClick={() => dispatch({ type: 'toggle-monitor-bypass' })}
-                >
-                  Monitor bypass
                 </button>
               </div>
 
