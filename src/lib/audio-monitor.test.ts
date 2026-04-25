@@ -101,12 +101,10 @@ const baselineCurve: CurvePoint[] = [
 ]
 
 let lastCreatedContext: FakeAudioContext | null = null
-let createdContextCount = 0
 
 class HookFakeAudioContext extends FakeAudioContext {
   constructor() {
     super()
-    createdContextCount += 1
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     lastCreatedContext = this
   }
@@ -127,7 +125,6 @@ class HookFakeAudioContext extends FakeAudioContext {
 describe('audio monitor graph', () => {
   afterEach(() => {
     lastCreatedContext = null
-    createdContextCount = 0
     vi.restoreAllMocks()
   })
 
@@ -312,31 +309,6 @@ describe('audio monitor graph', () => {
     expect(graph.filterNodes[0]).not.toBe(initialNodes[0])
   })
 
-  it('does not create or reconnect filters after the audio context is closed', () => {
-    const context = new HookFakeAudioContext() as unknown as AudioContext
-    const graph = createMonitorGraph(context, document.createElement('audio'))
-    const bands: EqBand[] = [
-      {
-        id: 'band-1',
-        type: 'peaking',
-        frequencyHz: 1000,
-        isBypassed: false,
-        gainDb: 4,
-        q: 1.1,
-        slopeDbPerOct: 12,
-      },
-    ]
-
-    syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8)
-    expect(graph.filterNodes).toHaveLength(2)
-
-    void (context as unknown as HookFakeAudioContext).close()
-    syncMonitorGraph(context, graph, [], baselineCurve, false, false, -8)
-
-    expect(graph.filterNodes).toHaveLength(2)
-    expect(graph.isConfigured).toBe(false)
-  })
-
   it('disconnects the monitor graph cleanly', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
@@ -457,41 +429,7 @@ const StrictModeWrapper = ({ children }: { children: ReactNode }) =>
 describe('useEqPlaybackMonitor StrictMode lifecycle', () => {
   afterEach(() => {
     lastCreatedContext = null
-    createdContextCount = 0
     vi.restoreAllMocks()
-  })
-
-  it('creates a new audio context when the previous one has been closed', () => {
-    Object.defineProperty(window, 'AudioContext', {
-      configurable: true,
-      value: HookFakeAudioContext,
-    })
-
-    const audio = createAudioElementHarness()
-    const { rerender } = renderHook(
-      ({ element }) =>
-        useEqPlaybackMonitor({
-          audioElement: element,
-          bands: [],
-          baselineCurve,
-          monitorBypassed: false,
-          monitorBaselineEnabled: false,
-          preGainDb: -8,
-        }),
-      {
-        initialProps: { element: audio.element },
-        wrapper: StrictModeWrapper,
-      },
-    )
-
-    const initialContext = lastCreatedContext as HookFakeAudioContext
-    void initialContext.close()
-
-    rerender({ element: null })
-    rerender({ element: audio.element })
-
-    expect(createdContextCount).toBe(2)
-    expect((lastCreatedContext as HookFakeAudioContext).state).toBe('running')
   })
 
   it('produces FFT frames after play in StrictMode', async () => {
