@@ -276,6 +276,10 @@ function setAudioParamValue(param: AudioParam, value: number) {
   param.value = value
 }
 
+function isAudioContextClosed(context: AudioContext | null | undefined) {
+  return context?.state === 'closed'
+}
+
 function createDescriptorNode(context: AudioContext, descriptor: FilterDescriptor) {
   const filter = context.createBiquadFilter()
   filter.type = descriptor.type
@@ -439,6 +443,11 @@ export function syncMonitorGraph(
   monitorBaselineEnabled: boolean,
   preGainDb: number,
 ) {
+  if (isAudioContextClosed(context)) {
+    graph.isConfigured = false
+    return
+  }
+
   const shouldApplyEq = !monitorBypassed
   const baselineDescriptors =
     shouldApplyEq && monitorBaselineEnabled
@@ -606,6 +615,7 @@ export function useEqPlaybackMonitor({
     if (
       !context ||
       !graph ||
+      isAudioContextClosed(context) ||
       !attachedElement ||
       attachedElement.paused ||
       attachedElement.ended
@@ -644,7 +654,14 @@ export function useEqPlaybackMonitor({
     const graph = graphRef.current
     const attachedElement = attachedElementRef.current
 
-    if (!context || !graph || !attachedElement || attachedElement.paused) {
+    if (
+      !context ||
+      !graph ||
+      isAudioContextClosed(context) ||
+      !attachedElement ||
+      attachedElement.paused
+    ) {
+      stopFftOverlay()
       return
     }
 
@@ -665,7 +682,13 @@ export function useEqPlaybackMonitor({
       return
     }
 
-    if (attachedElementRef.current === audioElement && graphRef.current) {
+    const currentContext = audioContextRef.current
+    if (
+      attachedElementRef.current === audioElement &&
+      graphRef.current &&
+      currentContext &&
+      !isAudioContextClosed(currentContext)
+    ) {
       return
     }
 
@@ -682,7 +705,10 @@ export function useEqPlaybackMonitor({
         disconnectMonitorGraph(graphRef.current)
       }
 
-      const context = audioContextRef.current ?? new ContextConstructor()
+      const context =
+        currentContext && !isAudioContextClosed(currentContext)
+          ? currentContext
+          : new ContextConstructor()
       const graph = createMonitorGraph(context, audioElement)
 
       audioContextRef.current = context
@@ -724,7 +750,7 @@ export function useEqPlaybackMonitor({
     const context = audioContextRef.current
     const graph = graphRef.current
 
-    if (!context || !graph) {
+    if (!context || !graph || isAudioContextClosed(context)) {
       return
     }
 
@@ -781,12 +807,17 @@ export function useEqPlaybackMonitor({
       stopFftOverlay()
 
       const graph = graphRef.current
+      const context = audioContextRef.current
+      graphRef.current = null
+      audioContextRef.current = null
+      attachedElementRef.current = null
+      spectrumBuffersRef.current = null
       if (graph) {
         disconnectMonitorGraph(graph)
       }
 
-      if (audioContextRef.current) {
-        void audioContextRef.current.close()
+      if (context && !isAudioContextClosed(context)) {
+        void context.close()
       }
     }
   }, [stopFftOverlay])
