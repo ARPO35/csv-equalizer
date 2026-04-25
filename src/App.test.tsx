@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FftOverlayStore } from './lib/audio-monitor'
 
@@ -49,6 +50,24 @@ vi.mock('./lib/files', async () => {
 
 import App from './App'
 import { saveTextFile } from './lib/files'
+
+const appCss = readFileSync('src/App.css', 'utf-8')
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getCssZIndex(selector: string) {
+  const ruleMatch = new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`).exec(
+    appCss,
+  )
+  expect(ruleMatch).toBeTruthy()
+
+  const zIndexMatch = /z-index:\s*(\d+)\s*;/.exec(ruleMatch?.[1] ?? '')
+  expect(zIndexMatch).toBeTruthy()
+
+  return Number(zIndexMatch?.[1])
+}
 
 function importCsvBaseline() {
   const csvInput = document.querySelector(
@@ -151,6 +170,35 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByText('Output EQ curve exported as CSV.')).toBeTruthy()
     })
+  })
+
+  it('keeps the export dialog above the selected node popover', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    const popover = document.createElement('div')
+    popover.className = 'band-popover'
+    popover.textContent = 'Selected node'
+    document.body.appendChild(popover)
+
+    try {
+      await user.click(screen.getByRole('button', { name: 'Export output' }))
+      const dialog = screen.getByRole('dialog', { name: 'Choose export format' })
+      const backdrop = dialog.closest('.modal-backdrop')
+      expect(backdrop).toBeTruthy()
+
+      expect(screen.getByText('Selected node')).toBeTruthy()
+      expect(getCssZIndex('.modal-backdrop')).toBeGreaterThan(
+        getCssZIndex('.band-popover'),
+      )
+    } finally {
+      popover.remove()
+    }
   })
 
   it('treats save AbortError as info and not as error', async () => {
