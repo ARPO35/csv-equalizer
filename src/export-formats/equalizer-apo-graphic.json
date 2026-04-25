@@ -1,0 +1,12 @@
+{
+  "id": "equalizer-apo-graphic",
+  "label": "Equalizer APO (GraphicEQ)",
+  "description": "GraphicEQ line accepted by Equalizer APO config files.",
+  "extension": ".txt",
+  "mimeType": "text/plain",
+  "serializer": "graphic-eq",
+  "frequencyMode": "custom-log",
+  "defaultPointCount": 127,
+  "gainDecimals": 2,
+  "frequencyDecimals": 2
+}

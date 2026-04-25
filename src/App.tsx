@@ -16,10 +16,16 @@ import { describeBand, sortBandsByFrequency } from './lib/bands'
 import { createLogFrequencyGrid, resampleCurve } from './lib/curve'
 import { parseCurveCsv } from './lib/csv'
 import { computeEqCurve, sumCurveWithEq } from './lib/eq'
+import {
+  type ExportAlignment,
+  getExportFormats,
+  getExportFrequencies,
+  prepareExportCurve,
+  serializeExportCurve,
+} from './lib/export'
 import { computeAutoPreGainDb } from './lib/pre-gain'
 import {
   saveTextFile,
-  serializeCurveCsv,
   serializePreset,
 } from './lib/files'
 import { EqEditorProvider, useEqEditor } from './state'
@@ -45,7 +51,7 @@ function EditorShell() {
   const curveInputRef = useRef<HTMLInputElement | null>(null)
   const audioInputRef = useRef<HTMLInputElement | null>(null)
   const presetHandleRef = useRef<FileSystemFileHandle | null>(null)
-  const exportHandleRef = useRef<FileSystemFileHandle | null>(null)
+  const exportHandlesRef = useRef(new Map<string, FileSystemFileHandle | null>())
   const audioObjectUrlRef = useRef<string | null>(null)
   const nextToastIdRef = useRef(0)
   const lastMonitorErrorRef = useRef<string | null>(null)
@@ -58,6 +64,20 @@ function EditorShell() {
   const [visualGainDraft, setVisualGainDraft] = useState('')
   const [isEditingFftSize, setIsEditingFftSize] = useState(false)
   const [fftSizeDraft, setFftSizeDraft] = useState('')
+  const exportFormats = useMemo(() => getExportFormats(), [])
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false)
+  const [selectedExportFormatId, setSelectedExportFormatId] = useState(
+    () => exportFormats[0]?.id ?? '',
+  )
+  const selectedExportFormat =
+    exportFormats.find((format) => format.id === selectedExportFormatId) ??
+    exportFormats[0]
+  const [exportPointCount, setExportPointCount] = useState(
+    () => selectedExportFormat?.defaultPointCount ?? 512,
+  )
+  const [exportAlignment, setExportAlignment] =
+    useState<ExportAlignment>('current')
+  const [shouldInvertExport, setShouldInvertExport] = useState(false)
   const { appliedBands, flushAppliedBands, markNextBandChange } = useAppliedBands(
     state.bands,
   )
@@ -97,7 +117,7 @@ function EditorShell() {
     state.preGainMode === 'auto' ? autoPreGainDb : state.manualPreGainDb
   const hasClipRisk = rawOutputPeakDb + effectivePreGainDb > 0
   const canSavePreset = Boolean(state.sourceFileName) || state.bands.length > 0
-  const canExportCurve = workingBaselineCurve.length > 0
+  const canExportCurve = workingBaselineCurve.length > 0 && exportFormats.length > 0
   const preset = useMemo<ProjectPresetV1>(
     () => ({
       version: 1,
@@ -393,7 +413,21 @@ function EditorShell() {
     }
   }
 
+  function openExportDialog() {
+    if (!selectedExportFormat) {
+      return
+    }
+
+    setExportPointCount(selectedExportFormat.defaultPointCount ?? outputCurve.length)
+    setIsExportDialogOpen(true)
+  }
+
   async function handleExportCurve() {
+    if (!selectedExportFormat) {
+      pushToast('error', 'No export formats are configured.')
+      return
+    }
+
     try {
       const targetOutputCurve = sumCurveWithEq(
         workingBaselineCurve,
@@ -402,17 +436,31 @@ function EditorShell() {
           workingFrequencies,
         ),
       )
-      const result = await saveTextFile({
-        suggestedName: `${getBaseFileName()}-eq.csv`,
-        mimeType: 'text/csv',
-        contents: serializeCurveCsv(targetOutputCurve),
-        handle: exportHandleRef.current,
+      const frequencies = getExportFrequencies(
+        selectedExportFormat,
+        exportPointCount,
+      )
+      const exportCurve = prepareExportCurve({
+        sourceCurve: targetOutputCurve,
+        frequencies,
+        preGainDb: effectivePreGainDb,
+        alignment: exportAlignment,
+        invert: shouldInvertExport,
       })
-      exportHandleRef.current = result.handle
+      const result = await saveTextFile({
+        suggestedName: `${getBaseFileName()}-eq${selectedExportFormat.extension}`,
+        mimeType: selectedExportFormat.mimeType,
+        description: selectedExportFormat.label,
+        extensions: [selectedExportFormat.extension],
+        contents: serializeExportCurve(selectedExportFormat, exportCurve),
+        handle: exportHandlesRef.current.get(selectedExportFormat.id) ?? null,
+      })
+      exportHandlesRef.current.set(selectedExportFormat.id, result.handle)
+      setIsExportDialogOpen(false)
       if (result.mode === 'download') {
         pushToast('warning', 'Exported curve via browser download fallback.')
       } else {
-        pushToast('info', 'Output EQ curve exported successfully.')
+        pushToast('info', `Output EQ curve exported as ${selectedExportFormat.label}.`)
       }
     } catch (error) {
       if (isAbortError(error)) {
@@ -473,12 +521,148 @@ function EditorShell() {
             type="button"
             className="accent-button"
             disabled={!canExportCurve}
-            onClick={() => void handleExportCurve()}
+            onClick={openExportDialog}
           >
             Export output
           </button>
         </div>
       </header>
+
+      {isExportDialogOpen && selectedExportFormat ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="export-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-dialog-title"
+          >
+            <div className="export-dialog-header">
+              <div>
+                <p className="section-label">Export output</p>
+                <h2 id="export-dialog-title">Choose export format</h2>
+              </div>
+              <button
+                type="button"
+                className="band-popover-close"
+                aria-label="Close export dialog"
+                onClick={() => setIsExportDialogOpen(false)}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="export-dialog-body">
+              <label className="export-field">
+                <span>Format</span>
+                <select
+                  value={selectedExportFormat.id}
+                  onChange={(event) => {
+                    const nextFormat = exportFormats.find(
+                      (format) => format.id === event.target.value,
+                    )
+                    if (!nextFormat) {
+                      return
+                    }
+                    setSelectedExportFormatId(nextFormat.id)
+                    setExportPointCount(
+                      nextFormat.defaultPointCount ?? outputCurve.length,
+                    )
+                  }}
+                >
+                  {exportFormats.map((format) => (
+                    <option key={format.id} value={format.id}>
+                      {format.label}
+                    </option>
+                  ))}
+                </select>
+                <small>{selectedExportFormat.description}</small>
+              </label>
+
+              <label className="export-field">
+                <span>Precision (x-axis points)</span>
+                <input
+                  type="number"
+                  min={16}
+                  max={8192}
+                  step={1}
+                  value={
+                    selectedExportFormat.frequencyMode === 'fixed'
+                      ? (selectedExportFormat.fixedFrequencies?.length ?? 0)
+                      : exportPointCount
+                  }
+                  disabled={selectedExportFormat.frequencyMode === 'fixed'}
+                  onChange={(event) => {
+                    const nextValue = Math.round(Number(event.target.value))
+                    if (!Number.isNaN(nextValue)) {
+                      setExportPointCount(Math.min(8192, Math.max(16, nextValue)))
+                    }
+                  }}
+                />
+                {selectedExportFormat.frequencyMode === 'fixed' ? (
+                  <small>This format uses a fixed frequency grid.</small>
+                ) : null}
+              </label>
+
+              <fieldset className="export-fieldset">
+                <legend>Alignment</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="export-alignment"
+                    checked={exportAlignment === 'current'}
+                    onChange={() => setExportAlignment('current')}
+                  />
+                  Current EQ editor + Pre-Gain
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="export-alignment"
+                    checked={exportAlignment === 'max-to-zero'}
+                    onChange={() => setExportAlignment('max-to-zero')}
+                  />
+                  Align highest point to 0 dB
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="export-alignment"
+                    checked={exportAlignment === 'min-to-zero'}
+                    onChange={() => setExportAlignment('min-to-zero')}
+                  />
+                  Align lowest point to 0 dB
+                </label>
+              </fieldset>
+
+              <label className="export-toggle">
+                <input
+                  type="checkbox"
+                  checked={shouldInvertExport}
+                  onChange={(event) => setShouldInvertExport(event.target.checked)}
+                />
+                Invert Y axis before alignment
+              </label>
+            </div>
+
+            <div className="export-dialog-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setIsExportDialogOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="accent-button"
+                onClick={() => void handleExportCurve()}
+              >
+                Export
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <main className="workspace">
         <aside className="panel panel-monitor">

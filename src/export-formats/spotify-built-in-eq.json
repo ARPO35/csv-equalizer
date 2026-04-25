@@ -1,0 +1,13 @@
+{
+  "id": "spotify-built-in-eq",
+  "label": "Spotify built-in EQ",
+  "description": "Six-band values for manually entering Spotify's built-in EQ.",
+  "extension": ".txt",
+  "mimeType": "text/plain",
+  "serializer": "fixed-band-text",
+  "frequencyMode": "fixed",
+  "fixedFrequencies": [60, 150, 400, 1000, 2400, 15000],
+  "fixedLabels": ["60 Hz", "150 Hz", "400 Hz", "1 kHz", "2.4 kHz", "15 kHz"],
+  "gainDecimals": 1,
+  "frequencyDecimals": 0
+}

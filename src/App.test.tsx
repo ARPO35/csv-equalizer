@@ -125,8 +125,10 @@ describe('App', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'Export output' }))
+    expect(screen.getByRole('dialog', { name: 'Choose export format' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Export' }))
     await waitFor(() => {
-      expect(screen.getByText('Output EQ curve exported successfully.')).toBeTruthy()
+      expect(screen.getByText('Output EQ curve exported as CSV.')).toBeTruthy()
     })
   })
 

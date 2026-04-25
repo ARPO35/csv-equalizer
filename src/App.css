@@ -829,6 +829,101 @@
   transform: translateY(-1px);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(3, 5, 8, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.export-dialog {
+  width: min(34rem, 100%);
+  max-height: min(44rem, calc(100svh - 2rem));
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(255, 202, 98, 0.12), transparent 36%),
+    rgba(9, 12, 18, 0.98);
+  box-shadow: 0 1.6rem 4rem rgba(0, 0, 0, 0.48);
+}
+
+.export-dialog-header,
+.export-dialog-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.export-dialog-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.export-dialog-body {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.export-field,
+.export-fieldset,
+.export-toggle {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.export-field span,
+.export-fieldset legend {
+  color: var(--muted-strong);
+  font-size: 0.82rem;
+}
+
+.export-field small {
+  color: var(--muted);
+}
+
+.export-field input,
+.export-field select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  padding: 0.55rem 0.65rem;
+}
+
+.export-field select {
+  color-scheme: dark;
+  background-color: rgba(11, 15, 22, 0.96);
+}
+
+.export-field input:disabled {
+  opacity: 0.65;
+}
+
+.export-fieldset {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.export-fieldset label,
+.export-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  color: var(--text);
+}
+
+.export-dialog-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     height: auto;

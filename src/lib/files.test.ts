@@ -52,10 +52,23 @@ describe('saveTextFile', () => {
     const result = await saveTextFile({
       suggestedName: 'preset.heq.json',
       mimeType: 'application/json',
+      description: 'Preset',
+      extensions: ['.heq.json'],
       contents: '{"version":1}',
     })
 
     expect(window.showSaveFilePicker).toHaveBeenCalled()
+    expect(window.showSaveFilePicker).toHaveBeenCalledWith({
+      suggestedName: 'preset.heq.json',
+      types: [
+        {
+          description: 'Preset',
+          accept: {
+            'application/json': ['.heq.json'],
+          },
+        },
+      ],
+    })
     expect(write).toHaveBeenCalledWith('{"version":1}')
     expect(result.mode).toBe('picker')
     expect(result.handle).toBe(handle)

@@ -1,0 +1,12 @@
+{
+  "id": "csv",
+  "label": "CSV",
+  "description": "Frequency and gain columns for general curve tools.",
+  "extension": ".csv",
+  "mimeType": "text/csv",
+  "serializer": "csv",
+  "frequencyMode": "custom-log",
+  "defaultPointCount": 512,
+  "gainDecimals": 6,
+  "frequencyDecimals": 6
+}

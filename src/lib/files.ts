@@ -5,6 +5,8 @@ type SaveFilePickerOptions = {
   mimeType: string
   contents: string
   handle?: FileSystemFileHandle | null
+  description?: string
+  extensions?: string[]
 }
 
 type SaveTextFileResult = {
@@ -51,6 +53,8 @@ export async function saveTextFile({
   mimeType,
   contents,
   handle,
+  description,
+  extensions,
 }: SaveFilePickerOptions): Promise<SaveTextFileResult> {
   if (window.showSaveFilePicker) {
     const fileHandle =
@@ -59,9 +63,11 @@ export async function saveTextFile({
         suggestedName,
         types: [
           {
-            description: mimeType,
+            description: description ?? mimeType,
             accept: {
-              [mimeType]: [suggestedName.endsWith('.json') ? '.json' : '.csv'],
+              [mimeType]:
+                extensions ??
+                [suggestedName.endsWith('.json') ? '.json' : '.csv'],
             },
           },
         ],
