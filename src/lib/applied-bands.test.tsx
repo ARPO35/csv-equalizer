@@ -21,6 +21,16 @@ function getAppliedPeakingGain(bands: ReturnType<typeof useAppliedBands>['applie
   return (bands[0] as PeakingBand).gainDb
 }
 
+function getAppliedPeakingFrequencyHz(
+  bands: ReturnType<typeof useAppliedBands>['appliedBands'],
+) {
+  return (bands[0] as PeakingBand).frequencyHz
+}
+
+function getProportionalAlpha(deltaMs: number) {
+  return 1 - Math.exp((-Math.log(100) * deltaMs) / BAND_SMOOTHING_DURATION_MS)
+}
+
 describe('useAppliedBands', () => {
   let frameTime = 0
   let nextFrameHandle = 1
@@ -86,10 +96,10 @@ describe('useAppliedBands', () => {
     expect(getAppliedPeakingGain(result.current.appliedBands)).toBeLessThan(6)
 
     act(() => {
-      advanceFrames(BAND_SMOOTHING_DURATION_MS)
+      advanceFrames(BAND_SMOOTHING_DURATION_MS * 2)
     })
 
-    expect(getAppliedPeakingGain(result.current.appliedBands)).toBeCloseTo(6, 3)
+    expect(getAppliedPeakingGain(result.current.appliedBands)).toBe(6)
   })
 
   it('restarts smoothing from the current applied snapshot on retarget', () => {
@@ -110,7 +120,7 @@ describe('useAppliedBands', () => {
     })
     act(() => {})
     act(() => {
-      advanceFrames(96)
+      advanceFrames(16)
     })
 
     const midGain = getAppliedPeakingGain(result.current.appliedBands)
@@ -125,11 +135,40 @@ describe('useAppliedBands', () => {
     })
     act(() => {})
     act(() => {
-      advanceFrames(96)
+      advanceFrames(16)
     })
 
     expect(getAppliedPeakingGain(result.current.appliedBands)).toBeGreaterThan(midGain)
     expect(getAppliedPeakingGain(result.current.appliedBands)).toBeLessThan(12)
+  })
+
+  it('smooths frequency in log domain while dragging', () => {
+    const { result, rerender } = renderHook(
+      ({ bands }) => useAppliedBands(bands),
+      {
+        initialProps: {
+          bands: [baseBand] as EqBand[],
+        },
+      },
+    )
+
+    act(() => {
+      result.current.markNextBandChange('smooth')
+      rerender({
+        bands: [{ ...baseBand, frequencyHz: 10_000 }] as EqBand[],
+      })
+    })
+    act(() => {})
+
+    act(() => {
+      advanceFrames(16)
+    })
+
+    const midFrequencyHz = getAppliedPeakingFrequencyHz(result.current.appliedBands)
+    const alpha = getProportionalAlpha(16)
+    const linearFrequencyHz = baseBand.frequencyHz + (10_000 - baseBand.frequencyHz) * alpha
+    expect(midFrequencyHz).toBeGreaterThan(baseBand.frequencyHz)
+    expect(midFrequencyHz).toBeLessThan(linearFrequencyHz)
   })
 
   it('snaps immediately when topology changes', () => {
