@@ -896,7 +896,15 @@ function EditorShell() {
                   onClick={handlePlaybackToggle}
                   disabled={!state.audioFileName}
                 >
-                  {isPlaying ? 'Pause' : 'Play'}
+                  {isPlaying ? (
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  )}
                 </button>
                 <label className="monitor-range-field monitor-position-field">
                   <span className="sr-only">Monitor position</span>
@@ -920,7 +928,7 @@ function EditorShell() {
                   />
                 </label>
                 <span className="monitor-time">
-                  {formatPlaybackTime(displayedCurrentTimeSec)} / {formatPlaybackTime(durationSec)}
+                  {formatPlaybackTime(displayedCurrentTimeSec)}
                 </span>
                 <button
                   type="button"
@@ -929,7 +937,18 @@ function EditorShell() {
                   onClick={handleMuteToggle}
                   disabled={!state.audioFileName}
                 >
-                  {isMuted ? 'Unmute' : 'Mute'}
+                  {isMuted ? (
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+                      <path d="m16.3 8.3-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3 2.3-2.3-1.4-1.4-2.3 2.3-2.3-2.3z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+                      <path d="M16 8.4v2.1c.7.4 1 1 1 1.5s-.3 1.1-1 1.5v2.1c1.9-.7 3-2 3-3.6s-1.1-2.9-3-3.6z" />
+                      <path d="M16 4.5v2c2.7.9 4.5 3 4.5 5.5S18.7 16.6 16 17.5v2c3.8-1 6.5-3.9 6.5-7.5S19.8 5.5 16 4.5z" />
+                    </svg>
+                  )}
                 </button>
                 <label className="monitor-range-field monitor-volume-field">
                   <span className="sr-only">Monitor volume</span>

@@ -299,7 +299,8 @@ describe('App monitor controls', () => {
     fireEvent(audio, new Event('durationchange'))
     fireEvent(audio, new Event('timeupdate'))
 
-    expect(screen.getByText('00:00 / 00:00')).toBeTruthy()
+    expect(screen.queryByText('00:00 / 00:00')).toBeNull()
+    expect(screen.getByText('00:00')).toBeTruthy()
   })
 
   it('updates custom monitor volume and mute state', async () => {
