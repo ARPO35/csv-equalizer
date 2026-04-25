@@ -390,11 +390,10 @@
 .monitor-player {
   width: 100%;
   height: 2.5rem;
-  border: 1px solid rgba(255, 162, 77, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0;
   background: rgba(15, 18, 24, 0.96);
-  accent-color: #ffb356;
-  filter: saturate(0.92) brightness(0.95);
+  accent-color: #ffffff;
 }
 
 .monitor-player::-webkit-media-controls-enclosure {
@@ -411,7 +410,10 @@
 .monitor-player::-webkit-media-controls-play-button,
 .monitor-player::-webkit-media-controls-mute-button,
 .monitor-player::-webkit-media-controls-fullscreen-button {
-  filter: saturate(1.25) hue-rotate(-8deg) brightness(1.04);
+  background-color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  color: #0b1016;
 }
 
 .monitor-player::-webkit-media-controls-current-time-display,
