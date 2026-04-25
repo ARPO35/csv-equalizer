@@ -1,5 +1,6 @@
 import {
   type ChangeEvent,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useEffectEvent,
@@ -71,6 +72,16 @@ function clampPlaybackRatio(value: number) {
   }
 
   return Math.min(1000, Math.max(0, value))
+}
+
+function getMonitorSliderStyle(fillPercent: number) {
+  const normalizedPercent = Number.isFinite(fillPercent)
+    ? Math.min(100, Math.max(0, fillPercent))
+    : 0
+
+  return {
+    '--monitor-slider-fill-percent': `${normalizedPercent}%`,
+  } as CSSProperties
 }
 
 function EditorShell() {
@@ -996,6 +1007,7 @@ function EditorShell() {
                     max="1000"
                     step="1"
                     value={displayedSeekRatio}
+                    style={getMonitorSliderStyle(displayedSeekRatio / 10)}
                     aria-label="Monitor position"
                     disabled={!hasSeekableDuration}
                     onChange={(event) => handleSeekPreview(Number(event.target.value))}
@@ -1068,6 +1080,7 @@ function EditorShell() {
                               max="1"
                               step="0.01"
                               value={volume}
+                              style={getMonitorSliderStyle(volume * 100)}
                               aria-label="Monitor volume"
                               disabled={!audioElement}
                               onChange={(event) => handleVolumeChange(Number(event.target.value))}
