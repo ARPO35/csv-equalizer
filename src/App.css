@@ -396,7 +396,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto minmax(4rem, 0.32fr);
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem;
   min-height: 2.5rem;
   padding: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -458,11 +458,11 @@
 }
 
 .monitor-time {
-  min-width: 3.25rem;
+  min-width: 2.65rem;
   color: var(--muted);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
-  text-align: center;
+  text-align: left;
   white-space: nowrap;
 }
 
