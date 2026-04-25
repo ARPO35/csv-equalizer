@@ -486,15 +486,15 @@
 
 .monitor-range-field input {
   width: 100%;
-  accent-color: #0e1118;
+  accent-color: #2c2f36;
   background: transparent;
-  color: #0e1118;
+  color: #2c2f36;
 }
 
 .monitor-range-field input::-webkit-slider-runnable-track {
   height: 0.3rem;
   border-radius: 999px;
-  background: #0e0f14;
+  background: #33353a;
 }
 
 .monitor-range-field input::-webkit-slider-thumb {
@@ -505,21 +505,21 @@
   margin-top: -0.225rem;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
-  background: #0e1118;
+  background: #2c2f36;
 }
 
 .monitor-range-field input::-moz-range-track {
   height: 0.3rem;
   border: none;
   border-radius: 999px;
-  background: #0e0f14;
+  background: #33353a;
 }
 
 .monitor-range-field input::-moz-range-progress {
   height: 0.3rem;
   border: none;
   border-radius: 999px;
-  background: #0e1118;
+  background: #2c2f36;
 }
 
 .monitor-range-field input::-moz-range-thumb {
@@ -527,7 +527,7 @@
   height: 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
-  background: #0e1118;
+  background: #2c2f36;
 }
 
 .monitor-range-field.monitor-volume-popover-field input::-webkit-slider-runnable-track {
@@ -547,7 +547,7 @@
 }
 
 .monitor-range-field input:disabled {
-  opacity: 0.42;
+  opacity: 1;
 }
 
 .monitor-time {
