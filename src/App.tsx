@@ -9,6 +9,7 @@ import {
 } from 'react'
 import './App.css'
 import { EqChart } from './components/EqChart'
+import { ToastRail, type ToastLevel, type ToastNotice } from './components/ToastRail'
 import { useAppliedBands } from './lib/applied-bands'
 import { useEqPlaybackMonitor } from './lib/audio-monitor'
 import { describeBand, sortBandsByFrequency } from './lib/bands'
@@ -28,14 +29,29 @@ function formatDb(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)} dB`
 }
 
+function isAbortError(error: unknown) {
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError'
+  }
+
+  if (typeof error !== 'object' || !error) {
+    return false
+  }
+
+  return 'name' in error && error.name === 'AbortError'
+}
+
 function EditorShell() {
   const curveInputRef = useRef<HTMLInputElement | null>(null)
   const audioInputRef = useRef<HTMLInputElement | null>(null)
   const presetHandleRef = useRef<FileSystemFileHandle | null>(null)
   const exportHandleRef = useRef<FileSystemFileHandle | null>(null)
   const audioObjectUrlRef = useRef<string | null>(null)
+  const nextToastIdRef = useRef(0)
+  const lastMonitorErrorRef = useRef<string | null>(null)
   const { state, dispatch } = useEqEditor()
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
+  const [toasts, setToasts] = useState<ToastNotice[]>([])
   const [isEditingPreGain, setIsEditingPreGain] = useState(false)
   const [preGainDraft, setPreGainDraft] = useState('')
   const [isEditingVisualGain, setIsEditingVisualGain] = useState(false)
@@ -97,6 +113,17 @@ function EditorShell() {
     monitorBypassed: state.monitorBypassed,
     monitorBaselineEnabled: state.monitorBaselineEnabled,
     preGainDb: effectivePreGainDb,
+  })
+
+  const pushToast = useEffectEvent((level: ToastLevel, message: string) => {
+    nextToastIdRef.current += 1
+    const id = `toast-${Date.now()}-${nextToastIdRef.current}`
+    const timestamp = Date.now()
+    setToasts((previous) => [...previous, { id, level, message, timestamp }])
+  })
+
+  const dismissToast = useEffectEvent((toastId: string) => {
+    setToasts((previous) => previous.filter((toast) => toast.id !== toastId))
   })
 
   function getBaseFileName() {
@@ -215,6 +242,21 @@ function EditorShell() {
   }, [handleSaveShortcut])
 
   useEffect(() => {
+    if (monitorErrorMessage) {
+      if (monitorErrorMessage !== lastMonitorErrorRef.current) {
+        pushToast('error', monitorErrorMessage)
+      }
+      lastMonitorErrorRef.current = monitorErrorMessage
+      return
+    }
+
+    if (lastMonitorErrorRef.current) {
+      pushToast('warning', 'Monitor recovered from previous error.')
+    }
+    lastMonitorErrorRef.current = null
+  }, [monitorErrorMessage, pushToast])
+
+  useEffect(() => {
     return () => {
       if (audioObjectUrlRef.current) {
         URL.revokeObjectURL(audioObjectUrlRef.current)
@@ -290,11 +332,11 @@ function EditorShell() {
       dispatch({ type: 'set-source-file-name', payload: file.name })
       dispatch({ type: 'set-baseline-curve', payload: curve })
       dispatch({ type: 'set-monitor-baseline-enabled', payload: true })
-      dispatch({ type: 'set-error', payload: undefined })
+      pushToast('info', `Imported EQ CSV: ${file.name}`)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to parse CSV file.'
-      dispatch({ type: 'set-error', payload: message })
+      pushToast('error', message)
     } finally {
       event.target.value = ''
     }
@@ -319,7 +361,6 @@ function EditorShell() {
       audioElement.load()
     }
 
-    dispatch({ type: 'set-error', payload: undefined })
     event.target.value = ''
   }
 
@@ -332,10 +373,19 @@ function EditorShell() {
         handle: presetHandleRef.current,
       })
       presetHandleRef.current = result.handle
+      if (result.mode === 'download') {
+        pushToast('warning', 'Saved preset via browser download fallback.')
+      } else {
+        pushToast('info', 'Preset saved successfully.')
+      }
     } catch (error) {
+      if (isAbortError(error)) {
+        pushToast('info', 'Preset save cancelled by user.')
+        return
+      }
       const message =
         error instanceof Error ? error.message : 'Failed to save preset.'
-      dispatch({ type: 'set-error', payload: message })
+      pushToast('error', message)
     }
   }
 
@@ -355,10 +405,19 @@ function EditorShell() {
         handle: exportHandleRef.current,
       })
       exportHandleRef.current = result.handle
+      if (result.mode === 'download') {
+        pushToast('warning', 'Exported curve via browser download fallback.')
+      } else {
+        pushToast('info', 'Output EQ curve exported successfully.')
+      }
     } catch (error) {
+      if (isAbortError(error)) {
+        pushToast('info', 'Curve export cancelled by user.')
+        return
+      }
       const message =
         error instanceof Error ? error.message : 'Failed to export EQ curve.'
-      dispatch({ type: 'set-error', payload: message })
+      pushToast('error', message)
     }
   }
 
@@ -366,6 +425,8 @@ function EditorShell() {
 
   return (
     <div className="app-shell">
+      <ToastRail toasts={toasts} onDismiss={dismissToast} />
+
       <header className="topbar">
         <div className="brand-lockup">
           <p className="eyebrow">CSV parametric eq editor</p>
@@ -462,20 +523,6 @@ function EditorShell() {
               />
             </div>
           </section>
-
-          {state.errorMessage ? (
-            <section className="panel-section">
-              <p className="section-label">Import status</p>
-              <div className="status-box status-error">{state.errorMessage}</div>
-            </section>
-          ) : null}
-
-          {monitorErrorMessage ? (
-            <section className="panel-section">
-              <p className="section-label">Monitor status</p>
-              <div className="status-box status-error">{monitorErrorMessage}</div>
-            </section>
-          ) : null}
 
         </aside>
 

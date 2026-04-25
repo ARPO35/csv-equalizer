@@ -65,5 +65,4 @@ export type EqEditorState = {
   manualPreGainDb: number
   visualGainDb: number
   audioFileName?: string
-  errorMessage?: string
 }

@@ -1,11 +1,85 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import App from './App'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FftOverlayStore } from './lib/audio-monitor'
 
-describe('App grid points', () => {
+const { monitorState, fftStore } = vi.hoisted(() => {
+  const mockedFftStore: FftOverlayStore = {
+    getSnapshot: () => ({
+      version: 0,
+      hasData: false,
+      sampleRate: 0,
+      frequencies: new Float32Array(0),
+      preLevels: new Float32Array(0),
+      postLevels: new Float32Array(0),
+    }),
+    subscribe: () => () => undefined,
+  }
+
+  return {
+    monitorState: {
+      errorMessage: null as string | null,
+    },
+    fftStore: mockedFftStore,
+  }
+})
+
+vi.mock('./lib/audio-monitor', async () => {
+  const actual = await vi.importActual<typeof import('./lib/audio-monitor')>(
+    './lib/audio-monitor',
+  )
+
+  return {
+    ...actual,
+    useEqPlaybackMonitor: vi.fn(() => ({
+      errorMessage: monitorState.errorMessage,
+      fftStore,
+      hasFftFrame: false,
+    })),
+  }
+})
+
+vi.mock('./lib/files', async () => {
+  const actual = await vi.importActual<typeof import('./lib/files')>('./lib/files')
+  return {
+    ...actual,
+    saveTextFile: vi.fn(),
+  }
+})
+
+import App from './App'
+import { saveTextFile } from './lib/files'
+
+function importCsvBaseline() {
+  const csvInput = document.querySelector(
+    'input[type="file"][accept=".csv,text/csv"]',
+  )
+  expect(csvInput).toBeTruthy()
+
+  const file = new File(
+    ['frequency,gain\n20,-3\n1000,0\n20000,2.5'],
+    'baseline.csv',
+    { type: 'text/csv' },
+  )
+
+  fireEvent.change(csvInput as Element, {
+    target: { files: [file] },
+  })
+}
+
+describe('App', () => {
+  beforeEach(() => {
+    monitorState.errorMessage = null
+    vi.mocked(saveTextFile).mockReset()
+    vi.mocked(saveTextFile).mockResolvedValue({
+      handle: null,
+      mode: 'picker',
+    } as { handle: null; mode: 'picker' })
+  })
+
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
   })
 
   it('starts at the default grid size and allows inline editing', async () => {
@@ -24,28 +98,93 @@ describe('App grid points', () => {
     expect(screen.getByLabelText('Edit grid points').textContent).toBe('256')
   })
 
-  it('syncs grid points to the imported csv point count', async () => {
+  it('syncs grid points to imported csv count and emits import success toast', async () => {
     render(<App />)
 
-    const csvInput = document.querySelector(
-      'input[type="file"][accept=".csv,text/csv"]',
-    )
-
-    expect(csvInput).toBeTruthy()
-
-    const file = new File(
-      ['frequency,gain\n20,-3\n1000,0\n20000,2.5'],
-      'baseline.csv',
-      { type: 'text/csv' },
-    )
-
-    fireEvent.change(csvInput as Element, {
-      target: { files: [file] },
-    })
+    importCsvBaseline()
 
     await waitFor(() => {
       expect(screen.getByLabelText('Edit grid points').textContent).toBe('3')
     })
+
+    expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+  })
+
+  it('emits info toasts for save and export success', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Save preset' }))
+    await waitFor(() => {
+      expect(screen.getByText('Preset saved successfully.')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Export output' }))
+    await waitFor(() => {
+      expect(screen.getByText('Output EQ curve exported successfully.')).toBeTruthy()
+    })
+  })
+
+  it('treats save AbortError as info and not as error', async () => {
+    const user = userEvent.setup()
+    vi.mocked(saveTextFile).mockRejectedValueOnce(
+      new DOMException('The operation was aborted.', 'AbortError'),
+    )
+
+    render(<App />)
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Save preset' }))
+    const toast = await screen.findByText('Preset save cancelled by user.')
+    const toastButton = toast.closest('button')
+
+    expect(toastButton?.className).toContain('toast-level-info')
+  })
+
+  it('emits warning toast when save falls back to download mode', async () => {
+    const user = userEvent.setup()
+    vi.mocked(saveTextFile).mockResolvedValueOnce({
+      handle: null,
+      mode: 'download',
+    } as { handle: null; mode: 'download' })
+
+    render(<App />)
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Save preset' }))
+    const toast = await screen.findByText('Saved preset via browser download fallback.')
+    const toastButton = toast.closest('button')
+
+    expect(toastButton?.className).toContain('toast-level-warning')
+  })
+
+  it('emits monitor error toast and recovery warning toast', async () => {
+    const view = render(<App />)
+
+    monitorState.errorMessage = 'Monitor graph failed to initialize.'
+    view.rerender(<App />)
+
+    const errorToast = await screen.findByText('Monitor graph failed to initialize.')
+    expect(errorToast.closest('button')?.className).toContain('toast-level-error')
+
+    monitorState.errorMessage = null
+    view.rerender(<App />)
+
+    const recoveryToast = await screen.findByText('Monitor recovered from previous error.')
+    expect(recoveryToast.closest('button')?.className).toContain('toast-level-warning')
+    expect(screen.queryByText('Import status')).toBeNull()
+    expect(screen.queryByText('Monitor status')).toBeNull()
   })
 })
 

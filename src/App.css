@@ -790,24 +790,6 @@
   margin-top: 0.25rem;
 }
 
-.status-box {
-  margin-top: 0.8rem;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid;
-}
-
-.status-error {
-  color: #ffd0c8;
-  border-color: rgba(255, 117, 89, 0.35);
-  background: rgba(255, 117, 89, 0.08);
-}
-
-.status-success {
-  color: #dfffc6;
-  border-color: rgba(166, 255, 74, 0.28);
-  background: rgba(166, 255, 74, 0.08);
-}
-
 .ghost-button,
 .accent-button {
   appearance: none;

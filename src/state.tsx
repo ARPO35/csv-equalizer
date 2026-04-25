@@ -14,7 +14,6 @@ type EqEditorAction =
   | { type: 'set-audio-file-name'; payload?: string }
   | { type: 'set-baseline-curve'; payload: CurvePoint[] }
   | { type: 'set-bands'; payload: EqBand[] }
-  | { type: 'set-error'; payload?: string }
   | { type: 'add-band'; payload: EqBand }
   | { type: 'update-band'; payload: EqBand }
   | { type: 'toggle-band-bypass'; payload: { id: string } }
@@ -44,7 +43,6 @@ const initialState: EqEditorState = {
   manualPreGainDb: -8,
   visualGainDb: 30,
   audioFileName: undefined,
-  errorMessage: undefined,
 }
 
 function eqEditorReducer(
@@ -73,11 +71,6 @@ function eqEditorReducer(
         ...state,
         bands: action.payload,
         selectedBandId: action.payload[0]?.id,
-      }
-    case 'set-error':
-      return {
-        ...state,
-        errorMessage: action.payload,
       }
     case 'add-band':
       return {
