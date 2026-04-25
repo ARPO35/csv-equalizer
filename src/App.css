@@ -454,21 +454,28 @@
 
 .monitor-volume-popover {
   position: fixed;
-  width: 8.5rem;
+  width: 3rem;
   max-width: calc(100vw - 1rem);
-  padding: 0.5rem 0.6rem;
+  padding: 0.55rem 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(7, 11, 16, 0.96);
   box-shadow: 0 0.8rem 1.65rem rgba(0, 0, 0, 0.28);
   z-index: 150;
 }
 
-.monitor-volume-popover-field {
-  width: 100%;
+.monitor-range-field.monitor-volume-popover-field {
+  width: auto;
+  justify-content: center;
 }
 
-.monitor-volume-popover-field input {
+.monitor-range-field.monitor-volume-popover-field input {
   margin: 0;
+  width: 1rem;
+  height: 6.5rem;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
 }
 
 .monitor-range-field {
@@ -1083,7 +1090,7 @@
   }
 
   .monitor-volume-popover {
-    width: min(9rem, calc(100vw - 3rem));
+    width: 3rem;
   }
 }
 
