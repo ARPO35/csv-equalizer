@@ -486,7 +486,64 @@
 
 .monitor-range-field input {
   width: 100%;
-  accent-color: #ffffff;
+  accent-color: #0e1118;
+  background: transparent;
+  color: #0e1118;
+}
+
+.monitor-range-field input::-webkit-slider-runnable-track {
+  height: 0.3rem;
+  border-radius: 999px;
+  background: #0e0f14;
+}
+
+.monitor-range-field input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-top: -0.225rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: #0e1118;
+}
+
+.monitor-range-field input::-moz-range-track {
+  height: 0.3rem;
+  border: none;
+  border-radius: 999px;
+  background: #0e0f14;
+}
+
+.monitor-range-field input::-moz-range-progress {
+  height: 0.3rem;
+  border: none;
+  border-radius: 999px;
+  background: #0e1118;
+}
+
+.monitor-range-field input::-moz-range-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: #0e1118;
+}
+
+.monitor-range-field.monitor-volume-popover-field input::-webkit-slider-runnable-track {
+  width: 0.3rem;
+  height: 100%;
+}
+
+.monitor-range-field.monitor-volume-popover-field input::-webkit-slider-thumb {
+  margin-top: 0;
+  margin-left: -0.225rem;
+}
+
+.monitor-range-field.monitor-volume-popover-field input::-moz-range-track,
+.monitor-range-field.monitor-volume-popover-field input::-moz-range-progress {
+  width: 0.3rem;
+  height: 100%;
 }
 
 .monitor-range-field input:disabled {
