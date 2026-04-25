@@ -47,6 +47,30 @@ function isAbortError(error: unknown) {
   return 'name' in error && error.name === 'AbortError'
 }
 
+function formatPlaybackTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '00:00'
+  }
+
+  const totalSeconds = Math.floor(seconds)
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainingSeconds = totalSeconds % 60
+
+  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+}
+
+function getFiniteDuration(audio: HTMLAudioElement) {
+  return Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0
+}
+
+function clampPlaybackRatio(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+
+  return Math.min(1000, Math.max(0, value))
+}
+
 function EditorShell() {
   const curveInputRef = useRef<HTMLInputElement | null>(null)
   const audioInputRef = useRef<HTMLInputElement | null>(null)
@@ -55,8 +79,16 @@ function EditorShell() {
   const audioObjectUrlRef = useRef<string | null>(null)
   const nextToastIdRef = useRef(0)
   const lastMonitorErrorRef = useRef<string | null>(null)
+  const lastAudibleVolumeRef = useRef(1)
   const { state, dispatch } = useEqEditor()
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [durationSec, setDurationSec] = useState(0)
+  const [currentTimeSec, setCurrentTimeSec] = useState(0)
+  const [volume, setVolume] = useState(1)
+  const [isMuted, setIsMuted] = useState(false)
+  const [isSeeking, setIsSeeking] = useState(false)
+  const [seekRatio, setSeekRatio] = useState(0)
   const [toasts, setToasts] = useState<ToastNotice[]>([])
   const [isEditingPreGain, setIsEditingPreGain] = useState(false)
   const [preGainDraft, setPreGainDraft] = useState('')
@@ -297,6 +329,75 @@ function EditorShell() {
     audioElement.load()
   }, [audioElement])
 
+  useEffect(() => {
+    if (!audioElement) {
+      setIsPlaying(false)
+      setDurationSec(0)
+      setCurrentTimeSec(0)
+      setVolume(1)
+      setIsMuted(false)
+      setIsSeeking(false)
+      setSeekRatio(0)
+      lastAudibleVolumeRef.current = 1
+      return
+    }
+
+    const audio = audioElement
+
+    function syncDuration() {
+      setDurationSec(getFiniteDuration(audio))
+    }
+
+    function syncCurrentTime() {
+      setCurrentTimeSec(audio.currentTime)
+    }
+
+    function syncVolume() {
+      const nextVolume = audio.volume
+      setVolume(nextVolume)
+      setIsMuted(audio.muted || nextVolume === 0)
+      if (nextVolume > 0) {
+        lastAudibleVolumeRef.current = nextVolume
+      }
+    }
+
+    function handlePlay() {
+      setIsPlaying(true)
+    }
+
+    function handlePause() {
+      setIsPlaying(false)
+    }
+
+    function handleEnded() {
+      setIsPlaying(false)
+      syncCurrentTime()
+    }
+
+    syncDuration()
+    syncCurrentTime()
+    syncVolume()
+    setIsPlaying(!audio.paused && !audio.ended)
+
+    audio.addEventListener('loadedmetadata', syncDuration)
+    audio.addEventListener('durationchange', syncDuration)
+    audio.addEventListener('timeupdate', syncCurrentTime)
+    audio.addEventListener('play', handlePlay)
+    audio.addEventListener('pause', handlePause)
+    audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('volumechange', syncVolume)
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', syncDuration)
+      audio.removeEventListener('durationchange', syncDuration)
+      audio.removeEventListener('timeupdate', syncCurrentTime)
+      audio.removeEventListener('play', handlePlay)
+      audio.removeEventListener('pause', handlePause)
+      audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('volumechange', syncVolume)
+    }
+  }, [audioElement])
+
   function updateBand(nextBand: EqBand, mode: BandUpdateMode) {
     const currentBand = state.bands.find((band) => band.id === nextBand.id)
     if (currentBand === nextBand) {
@@ -342,6 +443,75 @@ function EditorShell() {
 
   function handleAudioUploadClick() {
     audioInputRef.current?.click()
+  }
+
+  function handlePlaybackToggle() {
+    if (!audioElement) {
+      return
+    }
+
+    if (audioElement.paused || audioElement.ended) {
+      const playResult = audioElement.play()
+      if (playResult) {
+        playResult.catch((error: unknown) => {
+          console.warn('Failed to play monitor audio.', error)
+        })
+      }
+      return
+    }
+
+    audioElement.pause()
+  }
+
+  function handleSeekPreview(nextRatio: number) {
+    setIsSeeking(true)
+    setSeekRatio(clampPlaybackRatio(nextRatio))
+  }
+
+  function commitSeek(nextRatio = seekRatio) {
+    if (!audioElement || durationSec <= 0) {
+      setIsSeeking(false)
+      return
+    }
+
+    const nextTime = (clampPlaybackRatio(nextRatio) / 1000) * durationSec
+    audioElement.currentTime = nextTime
+    setCurrentTimeSec(nextTime)
+    setIsSeeking(false)
+  }
+
+  function handleVolumeChange(nextVolume: number) {
+    if (!audioElement) {
+      return
+    }
+
+    const normalizedVolume = Math.min(1, Math.max(0, nextVolume))
+    audioElement.volume = normalizedVolume
+    audioElement.muted = normalizedVolume === 0
+    setVolume(normalizedVolume)
+    setIsMuted(audioElement.muted)
+    if (normalizedVolume > 0) {
+      lastAudibleVolumeRef.current = normalizedVolume
+    }
+  }
+
+  function handleMuteToggle() {
+    if (!audioElement) {
+      return
+    }
+
+    if (audioElement.muted || audioElement.volume === 0) {
+      const restoredVolume =
+        audioElement.volume > 0 ? audioElement.volume : lastAudibleVolumeRef.current
+      audioElement.volume = restoredVolume
+      audioElement.muted = false
+      setVolume(restoredVolume)
+      setIsMuted(false)
+      return
+    }
+
+    audioElement.muted = true
+    setIsMuted(true)
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -474,6 +644,14 @@ function EditorShell() {
   }
 
   const sortedBands = sortBandsByFrequency(state.bands)
+  const hasSeekableDuration = durationSec > 0
+  const progressRatio = hasSeekableDuration
+    ? Math.round((currentTimeSec / durationSec) * 1000)
+    : 0
+  const displayedSeekRatio = isSeeking ? seekRatio : clampPlaybackRatio(progressRatio)
+  const displayedCurrentTimeSec = isSeeking && hasSeekableDuration
+    ? (displayedSeekRatio / 1000) * durationSec
+    : currentTimeSec
 
   return (
     <div className="app-shell">
@@ -706,9 +884,65 @@ function EditorShell() {
               <audio
                 ref={setAudioElement}
                 className="monitor-player"
-                controls
                 preload="metadata"
               />
+              <div className="monitor-controls" aria-label="Monitor playback controls">
+                <button
+                  type="button"
+                  className="monitor-control-button"
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  onClick={handlePlaybackToggle}
+                  disabled={!state.audioFileName}
+                >
+                  {isPlaying ? 'Pause' : 'Play'}
+                </button>
+                <label className="monitor-range-field monitor-position-field">
+                  <span className="sr-only">Monitor position</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1000"
+                    step="1"
+                    value={displayedSeekRatio}
+                    aria-label="Monitor position"
+                    disabled={!hasSeekableDuration}
+                    onChange={(event) => handleSeekPreview(Number(event.target.value))}
+                    onMouseUp={(event) => commitSeek(Number(event.currentTarget.value))}
+                    onTouchEnd={(event) => commitSeek(Number(event.currentTarget.value))}
+                    onKeyUp={(event) => commitSeek(Number(event.currentTarget.value))}
+                    onBlur={(event) => {
+                      if (isSeeking) {
+                        commitSeek(Number(event.currentTarget.value))
+                      }
+                    }}
+                  />
+                </label>
+                <span className="monitor-time">
+                  {formatPlaybackTime(displayedCurrentTimeSec)} / {formatPlaybackTime(durationSec)}
+                </span>
+                <button
+                  type="button"
+                  className="monitor-control-button"
+                  aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  onClick={handleMuteToggle}
+                  disabled={!state.audioFileName}
+                >
+                  {isMuted ? 'Unmute' : 'Mute'}
+                </button>
+                <label className="monitor-range-field monitor-volume-field">
+                  <span className="sr-only">Monitor volume</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={volume}
+                    aria-label="Monitor volume"
+                    disabled={!audioElement}
+                    onChange={(event) => handleVolumeChange(Number(event.target.value))}
+                  />
+                </label>
+              </div>
             </div>
           </section>
 

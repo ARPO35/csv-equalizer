@@ -67,8 +67,29 @@ function importCsvBaseline() {
   })
 }
 
+function importMonitorAudio() {
+  const audioInput = document.querySelector(
+    'input[type="file"][accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac"]',
+  )
+  expect(audioInput).toBeTruthy()
+
+  const file = new File(['audio'], 'monitor.mp3', { type: 'audio/mpeg' })
+
+  fireEvent.change(audioInput as Element, {
+    target: { files: [file] },
+  })
+}
+
 describe('App', () => {
   beforeEach(() => {
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:monitor-audio'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
     monitorState.errorMessage = null
     vi.mocked(saveTextFile).mockReset()
     vi.mocked(saveTextFile).mockResolvedValue({
@@ -221,12 +242,64 @@ describe('App monitor controls', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('uses native audio controls for the monitor player', () => {
+  it('uses custom monitor controls for the monitor player', () => {
     render(<App />)
 
-    expect(document.querySelector('audio.monitor-player[controls]')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Play' })).toBeNull()
-    expect(screen.queryByLabelText('Monitor position')).toBeNull()
-    expect(screen.queryByLabelText('Monitor volume')).toBeNull()
+    const audio = document.querySelector('audio.monitor-player')
+
+    expect(audio).toBeTruthy()
+    expect(audio?.hasAttribute('controls')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy()
+    expect(screen.getByLabelText('Monitor position')).toBeTruthy()
+    expect(screen.getByLabelText('Monitor volume')).toBeTruthy()
+  })
+
+  it('plays through the custom monitor button', async () => {
+    const user = userEvent.setup()
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockResolvedValue(undefined)
+
+    render(<App />)
+    importMonitorAudio()
+
+    await user.click(screen.getByRole('button', { name: 'Play' }))
+
+    expect(playSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('commits custom monitor seek changes to audio currentTime', () => {
+    render(<App />)
+    importMonitorAudio()
+
+    const audio = document.querySelector('audio.monitor-player') as HTMLAudioElement
+    Object.defineProperty(audio, 'duration', {
+      configurable: true,
+      value: 120,
+    })
+    fireEvent(audio, new Event('durationchange'))
+
+    const position = screen.getByLabelText('Monitor position')
+    fireEvent.change(position, { target: { value: '500' } })
+    fireEvent.mouseUp(position)
+
+    expect(audio.currentTime).toBe(60)
+  })
+
+  it('updates custom monitor volume and mute state', async () => {
+    const user = userEvent.setup()
+
+    render(<App />)
+    importMonitorAudio()
+
+    const audio = document.querySelector('audio.monitor-player') as HTMLAudioElement
+    const volumeSlider = screen.getByLabelText('Monitor volume')
+
+    fireEvent.change(volumeSlider, { target: { value: '0.4' } })
+    expect(audio.volume).toBe(0.4)
+    expect(audio.muted).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Mute' }))
+    expect(audio.muted).toBe(true)
   })
 })
