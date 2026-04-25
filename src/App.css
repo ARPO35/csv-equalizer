@@ -448,21 +448,19 @@
 }
 
 .monitor-volume-anchor {
-  position: relative;
   display: inline-flex;
   align-items: center;
 }
 
 .monitor-volume-popover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 0.45rem);
+  position: fixed;
   width: 8.5rem;
+  max-width: calc(100vw - 1rem);
   padding: 0.5rem 0.6rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(7, 11, 16, 0.96);
   box-shadow: 0 0.8rem 1.65rem rgba(0, 0, 0, 0.28);
-  z-index: 30;
+  z-index: 150;
 }
 
 .monitor-volume-popover-field {
@@ -1085,7 +1083,6 @@
   }
 
   .monitor-volume-popover {
-    right: -0.2rem;
     width: min(9rem, calc(100vw - 3rem));
   }
 }

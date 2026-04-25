@@ -314,6 +314,10 @@ describe('App monitor controls', () => {
     const volumeButton = screen.getByRole('button', { name: 'Adjust volume' })
     await user.click(volumeButton)
 
+    const popover = screen.getByRole('dialog', { name: 'Adjust monitor volume' })
+    expect(popover.parentElement).toBe(document.body)
+    expect(popover.getAttribute('style')).toContain('position: fixed')
+
     const volumeSlider = screen.getByLabelText('Monitor volume')
 
     fireEvent.change(volumeSlider, { target: { value: '0.4' } })

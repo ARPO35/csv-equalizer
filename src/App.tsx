@@ -3,10 +3,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
   useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import './App.css'
 import { EqChart } from './components/EqChart'
 import { ToastRail, type ToastLevel, type ToastNotice } from './components/ToastRail'
@@ -89,6 +91,10 @@ function EditorShell() {
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
   const [isVolumePopoverOpen, setIsVolumePopoverOpen] = useState(false)
+  const [volumePopoverPosition, setVolumePopoverPosition] = useState<{
+    top: number
+    left: number
+  } | null>(null)
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekRatio, setSeekRatio] = useState(0)
   const [toasts, setToasts] = useState<ToastNotice[]>([])
@@ -339,6 +345,7 @@ function EditorShell() {
       setVolume(1)
       setIsMuted(false)
       setIsVolumePopoverOpen(false)
+      setVolumePopoverPosition(null)
       setIsSeeking(false)
       setSeekRatio(0)
       return
@@ -400,11 +407,13 @@ function EditorShell() {
   useEffect(() => {
     if (!state.audioFileName) {
       setIsVolumePopoverOpen(false)
+      setVolumePopoverPosition(null)
     }
   }, [state.audioFileName])
 
   useEffect(() => {
     if (!isVolumePopoverOpen) {
+      setVolumePopoverPosition(null)
       return
     }
 
@@ -437,6 +446,55 @@ function EditorShell() {
     return () => {
       window.removeEventListener('mousedown', handleGlobalMouseDown)
       window.removeEventListener('keydown', handleGlobalKeyDown)
+    }
+  }, [isVolumePopoverOpen])
+
+  useLayoutEffect(() => {
+    if (!isVolumePopoverOpen) {
+      return
+    }
+
+    function updateVolumePopoverPosition() {
+      const trigger = volumePopoverTriggerRef.current
+      const popover = volumePopoverRef.current
+      if (!trigger || !popover) {
+        return
+      }
+
+      const triggerRect = trigger.getBoundingClientRect()
+      const popoverRect = popover.getBoundingClientRect()
+      const viewportPadding = 8
+      const popoverGap = 8
+      const nextTop = Math.max(
+        viewportPadding,
+        triggerRect.top - popoverRect.height - popoverGap,
+      )
+      const unclampedLeft = triggerRect.right - popoverRect.width
+      const maxLeft = window.innerWidth - popoverRect.width - viewportPadding
+      const nextLeft = Math.max(
+        viewportPadding,
+        Math.min(maxLeft, unclampedLeft),
+      )
+
+      setVolumePopoverPosition((previous) => {
+        if (
+          previous &&
+          Math.abs(previous.top - nextTop) < 0.5 &&
+          Math.abs(previous.left - nextLeft) < 0.5
+        ) {
+          return previous
+        }
+
+        return { top: nextTop, left: nextLeft }
+      })
+    }
+
+    updateVolumePopoverPosition()
+    window.addEventListener('resize', updateVolumePopoverPosition)
+    window.addEventListener('scroll', updateVolumePopoverPosition, true)
+    return () => {
+      window.removeEventListener('resize', updateVolumePopoverPosition)
+      window.removeEventListener('scroll', updateVolumePopoverPosition, true)
     }
   }, [isVolumePopoverOpen])
 
@@ -979,29 +1037,46 @@ function EditorShell() {
                       </svg>
                     )}
                   </button>
-                  {isVolumePopoverOpen ? (
-                    <div
-                      ref={volumePopoverRef}
-                      id="monitor-volume-popover"
-                      className="monitor-volume-popover"
-                      role="dialog"
-                      aria-label="Adjust monitor volume"
-                    >
-                      <label className="monitor-range-field monitor-volume-popover-field">
-                        <span className="sr-only">Monitor volume</span>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.01"
-                          value={volume}
-                          aria-label="Monitor volume"
-                          disabled={!audioElement}
-                          onChange={(event) => handleVolumeChange(Number(event.target.value))}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
+                  {isVolumePopoverOpen && typeof document !== 'undefined'
+                    ? createPortal(
+                        <div
+                          ref={volumePopoverRef}
+                          id="monitor-volume-popover"
+                          className="monitor-volume-popover"
+                          role="dialog"
+                          aria-label="Adjust monitor volume"
+                          style={
+                            volumePopoverPosition
+                              ? {
+                                  position: 'fixed',
+                                  top: volumePopoverPosition.top,
+                                  left: volumePopoverPosition.left,
+                                }
+                              : {
+                                  position: 'fixed',
+                                  top: 0,
+                                  left: 0,
+                                  visibility: 'hidden',
+                                }
+                          }
+                        >
+                          <label className="monitor-range-field monitor-volume-popover-field">
+                            <span className="sr-only">Monitor volume</span>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.01"
+                              value={volume}
+                              aria-label="Monitor volume"
+                              disabled={!audioElement}
+                              onChange={(event) => handleVolumeChange(Number(event.target.value))}
+                            />
+                          </label>
+                        </div>,
+                        document.body,
+                      )
+                    : null}
                 </div>
               </div>
             </div>
