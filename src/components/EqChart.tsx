@@ -32,7 +32,7 @@ const MAX_FREQUENCY = 20_000
 const GRID_FREQUENCIES = [20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000]
 const MIN_Q = 0.1
 const MAX_Q = 12
-const WHEEL_Q_STEP = 0.05
+const WHEEL_Q_MULTIPLIER = 1.08
 const MUSICAL_SLOPE_VALUES = [6, 12, 18, 24, 30, 36, 42, 48] as const
 const CUT_SLOPE_VALUES = [12, 24, 36, 48] as const
 const FFT_FADE_FLOOR_DB = 0.75
@@ -501,6 +501,14 @@ function roundQ(value: number) {
   return Number(value.toFixed(2))
 }
 
+function getNextWheelQ(currentQ: number, direction: number) {
+  const scaledQ =
+    direction > 0
+      ? currentQ * WHEEL_Q_MULTIPLIER
+      : currentQ / WHEEL_Q_MULTIPLIER
+  return roundQ(clampQ(scaledQ))
+}
+
 function getNearestStep<T extends number>(value: number, steps: readonly T[]): T {
   const nearest = steps.reduce((best, current) =>
     Math.abs(current - value) < Math.abs(best - value) ? current : best,
@@ -889,7 +897,7 @@ export function EqChart({
           onBandCommitRef.current,
           {
             ...activeBand,
-            q: roundQ(clampQ(activeBand.q + direction * WHEEL_Q_STEP)),
+            q: getNextWheelQ(activeBand.q, direction),
           },
           'immediate',
         )

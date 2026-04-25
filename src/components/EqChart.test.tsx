@@ -185,7 +185,7 @@ describe('EqChart', () => {
 
     expect(onBandCommit).toHaveBeenCalledWith({
       ...band,
-      q: 1.15,
+      q: 1.19,
     }, 'immediate')
 
     fireEvent.pointerUp(node, { pointerId: 1 })
@@ -193,6 +193,192 @@ describe('EqChart', () => {
     onBandCommit.mockClear()
     fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
     expect(onBandCommit).not.toHaveBeenCalled()
+  })
+
+  it('changes high Q more than low Q with one wheel step', () => {
+    const lowBand: EqBand = {
+      id: 'band-low',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1,
+      slopeDbPerOct: 12,
+    }
+    const highBand: EqBand = {
+      ...lowBand,
+      id: 'band-high',
+      q: 10,
+    }
+
+    const lowCommit = vi.fn()
+    const lowRender = renderChart({
+      bands: [lowBand],
+      selectedBandId: lowBand.id,
+      onBandCommit: lowCommit,
+    })
+
+    const lowNode = within(lowRender.container).getByLabelText('Bell band')
+    const lowFrame = lowRender.container.querySelector('.chart-frame')
+    expect(lowFrame).toBeTruthy()
+
+    fireEvent.pointerDown(lowNode, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    lowCommit.mockClear()
+    fireEvent.wheel(lowFrame as Element, { deltaY: -100 })
+    const lowNextQ = lowCommit.mock.calls[0]?.[0]?.q as number
+    fireEvent.pointerUp(lowNode, { pointerId: 1 })
+
+    cleanup()
+
+    const highCommit = vi.fn()
+    const highRender = renderChart({
+      bands: [highBand],
+      selectedBandId: highBand.id,
+      onBandCommit: highCommit,
+    })
+
+    const highNode = within(highRender.container).getByLabelText('Bell band')
+    const highFrame = highRender.container.querySelector('.chart-frame')
+    expect(highFrame).toBeTruthy()
+
+    fireEvent.pointerDown(highNode, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    highCommit.mockClear()
+    fireEvent.wheel(highFrame as Element, { deltaY: -100 })
+    const highNextQ = highCommit.mock.calls[0]?.[0]?.q as number
+
+    expect(highNextQ - highBand.q).toBeGreaterThan(lowNextQ - lowBand.q)
+  })
+
+  it('keeps Q within min and max bounds when using wheel', () => {
+    const onBandCommit = vi.fn()
+    const maxBand: EqBand = {
+      id: 'band-max',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 12,
+      slopeDbPerOct: 12,
+    }
+
+    const maxRender = renderChart({
+      bands: [maxBand],
+      selectedBandId: maxBand.id,
+      onBandCommit,
+    })
+
+    const maxNode = within(maxRender.container).getByLabelText('Bell band')
+    const maxFrame = maxRender.container.querySelector('.chart-frame')
+    expect(maxFrame).toBeTruthy()
+
+    fireEvent.pointerDown(maxNode, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+    fireEvent.wheel(maxFrame as Element, { deltaY: -100 })
+    expect(onBandCommit).toHaveBeenCalledWith({
+      ...maxBand,
+      q: 12,
+    }, 'immediate')
+
+    cleanup()
+
+    const minBand: EqBand = {
+      ...maxBand,
+      id: 'band-min',
+      q: 0.1,
+    }
+    const minCommit = vi.fn()
+    const minRender = renderChart({
+      bands: [minBand],
+      selectedBandId: minBand.id,
+      onBandCommit: minCommit,
+    })
+
+    const minNode = within(minRender.container).getByLabelText('Bell band')
+    const minFrame = minRender.container.querySelector('.chart-frame')
+    expect(minFrame).toBeTruthy()
+
+    fireEvent.pointerDown(minNode, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    minCommit.mockClear()
+    fireEvent.wheel(minFrame as Element, { deltaY: 100 })
+    expect(minCommit).toHaveBeenCalledWith({
+      ...minBand,
+      q: 0.1,
+    }, 'immediate')
+  })
+
+  it('approximately returns to original Q after one up and one down wheel step', () => {
+    const onBandCommit = vi.fn()
+    const band: EqBand = {
+      id: 'band-1',
+      type: 'peaking',
+      frequencyHz: 1000,
+      isBypassed: false,
+      gainDb: 3,
+      q: 1.1,
+      slopeDbPerOct: 12,
+    }
+
+    const { container, rerender } = renderChart({
+      bands: [band],
+      selectedBandId: band.id,
+      onBandCommit,
+    })
+
+    const node = within(container).getByLabelText('Bell band')
+    const chartFrame = container.querySelector('.chart-frame')
+    expect(chartFrame).toBeTruthy()
+
+    fireEvent.pointerDown(node, {
+      pointerId: 1,
+      clientX: 600,
+      clientY: 350,
+    })
+    onBandCommit.mockClear()
+    fireEvent.wheel(chartFrame as Element, { deltaY: -100 })
+    const qAfterUp = onBandCommit.mock.calls[0]?.[0]?.q as number
+
+    rerender(
+      <EqChart
+        baselineCurve={baselineCurve}
+        bandCurve={createFlatCurve([20, 1000, 20000])}
+        outputCurve={baselineCurve}
+        bands={[{ ...band, q: qAfterUp }]}
+        selectedBandId={band.id}
+        visualGainDb={30}
+        viewMinDb={-15}
+        viewMaxDb={15}
+        onBandCommit={onBandCommit}
+        onBandCreate={vi.fn()}
+        onBandDelete={vi.fn()}
+        onBandToggleBypass={vi.fn()}
+        onBandSelect={vi.fn()}
+        onIncreaseViewMax={vi.fn()}
+        onDecreaseViewMax={vi.fn()}
+        onIncreaseViewMin={vi.fn()}
+        onDecreaseViewMin={vi.fn()}
+      />,
+    )
+
+    onBandCommit.mockClear()
+    fireEvent.wheel(chartFrame as Element, { deltaY: 100 })
+    const qAfterDown = onBandCommit.mock.calls[0]?.[0]?.q as number
+    expect(qAfterDown).toBeCloseTo(band.q, 2)
   })
 
   it('marks pointer drag updates as smooth', () => {
