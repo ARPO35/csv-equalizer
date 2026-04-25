@@ -649,9 +649,11 @@ function EditorShell() {
     ? Math.round((currentTimeSec / durationSec) * 1000)
     : 0
   const displayedSeekRatio = isSeeking ? seekRatio : clampPlaybackRatio(progressRatio)
-  const displayedCurrentTimeSec = isSeeking && hasSeekableDuration
-    ? (displayedSeekRatio / 1000) * durationSec
-    : currentTimeSec
+  const displayedCurrentTimeSec = !hasSeekableDuration
+    ? 0
+    : isSeeking
+      ? (displayedSeekRatio / 1000) * durationSec
+      : currentTimeSec
 
   return (
     <div className="app-shell">

@@ -286,6 +286,22 @@ describe('App monitor controls', () => {
     expect(audio.currentTime).toBe(60)
   })
 
+  it('shows zero monitor time when duration is unavailable', () => {
+    render(<App />)
+    importMonitorAudio()
+
+    const audio = document.querySelector('audio.monitor-player') as HTMLAudioElement
+    Object.defineProperty(audio, 'duration', {
+      configurable: true,
+      value: Number.NaN,
+    })
+    audio.currentTime = 12
+    fireEvent(audio, new Event('durationchange'))
+    fireEvent(audio, new Event('timeupdate'))
+
+    expect(screen.getByText('00:00 / 00:00')).toBeTruthy()
+  })
+
   it('updates custom monitor volume and mute state', async () => {
     const user = userEvent.setup()
 
