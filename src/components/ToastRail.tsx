@@ -37,8 +37,8 @@ export function ToastRail({
   autoHideMs = DEFAULT_AUTO_HIDE_MS,
 }: ToastRailProps) {
   const onDismissRef = useRef(onDismiss)
-  const hideTimeoutsRef = useRef(new Map<string, ReturnType<typeof window.setTimeout>>())
-  const exitTimeoutsRef = useRef(new Map<string, ReturnType<typeof window.setTimeout>>())
+  const hideTimeoutsRef = useRef(new Map<string, number>())
+  const exitTimeoutsRef = useRef(new Map<string, number>())
   const remainingTimesRef = useRef(new Map<string, number>())
   const startedAtRef = useRef(new Map<string, number>())
   const pausedIdsRef = useRef(new Set<string>())

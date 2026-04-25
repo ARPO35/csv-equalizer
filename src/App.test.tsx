@@ -82,29 +82,29 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
-  it('starts at the default grid size and allows inline editing', async () => {
+  it('starts at the default FFT size and allows inline editing', async () => {
     const user = userEvent.setup()
 
     render(<App />)
 
-    const valueButton = screen.getByLabelText('Edit grid points')
-    expect(valueButton.textContent).toBe('512')
+    const valueButton = screen.getByLabelText('Edit FFT size')
+    expect(valueButton.textContent).toBe('8192')
 
     await user.dblClick(valueButton)
-    const input = screen.getByLabelText('Grid points')
+    const input = screen.getByLabelText('FFT size')
     await user.clear(input)
     await user.type(input, '256{Enter}')
 
-    expect(screen.getByLabelText('Edit grid points').textContent).toBe('256')
+    expect(screen.getByLabelText('Edit FFT size').textContent).toBe('256')
   })
 
-  it('syncs grid points to imported csv count and emits import success toast', async () => {
+  it('keeps FFT size unchanged when importing csv and emits import success toast', async () => {
     render(<App />)
 
     importCsvBaseline()
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Edit grid points').textContent).toBe('3')
+      expect(screen.getByLabelText('Edit FFT size').textContent).toBe('8192')
     })
 
     expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()

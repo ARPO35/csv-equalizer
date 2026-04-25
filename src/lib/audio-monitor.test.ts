@@ -176,7 +176,7 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, bands, baselineCurve, false, true, -10)
+    syncMonitorGraph(context, graph, bands, baselineCurve, false, true, -10, 8192)
 
     expect(graph.filterNodes).toHaveLength(33)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
@@ -204,7 +204,7 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, bands, baselineCurve, true, false, -8)
+    syncMonitorGraph(context, graph, bands, baselineCurve, true, false, -8, 8192)
 
     expect(graph.filterNodes).toHaveLength(0)
     expect(getConnections(graph.wetInput)).toEqual([
@@ -233,7 +233,7 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8)
+    syncMonitorGraph(context, graph, bands, baselineCurve, false, false, -8, 8192)
 
     expect(graph.filterNodes).toHaveLength(5)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).type).toBe('lowshelf')
@@ -255,7 +255,7 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
+    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8, 8192)
 
     const initialNode = graph.filterNodes[0]
 
@@ -269,7 +269,7 @@ describe('audio monitor graph', () => {
       slopeDbPerOct: 12,
     }
 
-    syncMonitorGraph(context, graph, [updatedBand], baselineCurve, false, false, -6)
+    syncMonitorGraph(context, graph, [updatedBand], baselineCurve, false, false, -6, 8192)
 
     expect(graph.filterNodes[0]).toBe(initialNode)
     expect((graph.filterNodes[0] as unknown as FakeBiquadFilterNode).frequency.value).toBe(1600)
@@ -291,7 +291,7 @@ describe('audio monitor graph', () => {
       },
     ]
 
-    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8)
+    syncMonitorGraph(context, graph, initialBands, baselineCurve, false, false, -8, 8192)
 
     const initialNodes = [...graph.filterNodes]
 
@@ -303,6 +303,7 @@ describe('audio monitor graph', () => {
       false,
       false,
       -8,
+      8192,
     )
 
     expect(graph.filterNodes).toHaveLength(4)
@@ -313,7 +314,7 @@ describe('audio monitor graph', () => {
     const context = new FakeAudioContext() as unknown as AudioContext
     const graph = createMonitorGraph(context, document.createElement('audio'))
 
-    syncMonitorGraph(context, graph, [], baselineCurve, false, true, -8)
+    syncMonitorGraph(context, graph, [], baselineCurve, false, true, -8, 8192)
     disconnectMonitorGraph(graph)
 
     expect(getConnections(graph.source)).toEqual([])

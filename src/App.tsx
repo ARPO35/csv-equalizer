@@ -11,7 +11,7 @@ import './App.css'
 import { EqChart } from './components/EqChart'
 import { ToastRail, type ToastLevel, type ToastNotice } from './components/ToastRail'
 import { useAppliedBands } from './lib/applied-bands'
-import { useEqPlaybackMonitor } from './lib/audio-monitor'
+import { FFT_SIZE_OPTIONS, useEqPlaybackMonitor } from './lib/audio-monitor'
 import { describeBand, sortBandsByFrequency } from './lib/bands'
 import { createLogFrequencyGrid, resampleCurve } from './lib/curve'
 import { parseCurveCsv } from './lib/csv'
@@ -56,8 +56,8 @@ function EditorShell() {
   const [preGainDraft, setPreGainDraft] = useState('')
   const [isEditingVisualGain, setIsEditingVisualGain] = useState(false)
   const [visualGainDraft, setVisualGainDraft] = useState('')
-  const [isEditingGridPoints, setIsEditingGridPoints] = useState(false)
-  const [gridPointDraft, setGridPointDraft] = useState('')
+  const [isEditingFftSize, setIsEditingFftSize] = useState(false)
+  const [fftSizeDraft, setFftSizeDraft] = useState('')
   const { appliedBands, flushAppliedBands, markNextBandChange } = useAppliedBands(
     state.bands,
   )
@@ -67,8 +67,8 @@ function EditorShell() {
     [appliedBands],
   )
   const workingFrequencies = useMemo(
-    () => createLogFrequencyGrid(state.gridPointCount),
-    [state.gridPointCount],
+    () => createLogFrequencyGrid(),
+    [],
   )
   const workingBaselineCurve = useMemo(
     () => resampleCurve(state.baselineCurve, workingFrequencies),
@@ -113,6 +113,7 @@ function EditorShell() {
     monitorBypassed: state.monitorBypassed,
     monitorBaselineEnabled: state.monitorBaselineEnabled,
     preGainDb: effectivePreGainDb,
+    fftSize: state.fftSize,
   })
 
   const pushToast = useEffectEvent((level: ToastLevel, message: string) => {
@@ -172,21 +173,24 @@ function EditorShell() {
     setVisualGainDraft(state.visualGainDb.toFixed(1))
   }
 
-  function commitGridPoints() {
-    const nextValue = Math.round(Number(gridPointDraft))
+  function commitFftSize() {
+    const nextValue = Math.round(Number(fftSizeDraft))
     if (!Number.isNaN(nextValue)) {
+      const nearestFftSize = FFT_SIZE_OPTIONS.reduce((best, option) =>
+        Math.abs(option - nextValue) < Math.abs(best - nextValue) ? option : best,
+      )
       dispatch({
-        type: 'set-grid-point-count',
-        payload: Math.min(8192, Math.max(16, nextValue)),
+        type: 'set-fft-size',
+        payload: nearestFftSize,
       })
     }
-    setIsEditingGridPoints(false)
-    setGridPointDraft('')
+    setIsEditingFftSize(false)
+    setFftSizeDraft('')
   }
 
-  function startGridPointsEdit() {
-    setIsEditingGridPoints(true)
-    setGridPointDraft(state.gridPointCount.toString())
+  function startFftSizeEdit() {
+    setIsEditingFftSize(true)
+    setFftSizeDraft(state.fftSize.toString())
   }
 
   const handleDeleteSelectedBand = useEffectEvent((event: KeyboardEvent) => {
@@ -602,38 +606,44 @@ function EditorShell() {
                 <strong>{state.sourceFileName ?? 'Flat 0 dB'}</strong>
               </article>
               <article>
-                <span>Grid points</span>
+                <span>FFT Size</span>
                 <div className="metric-inline-row">
-                  {isEditingGridPoints ? (
+                  {isEditingFftSize ? (
                     <input
-                      aria-label="Grid points"
+                      aria-label="FFT size"
                       className="metric-inline-input"
                       type="number"
                       autoFocus
                       step={1}
-                      value={gridPointDraft}
-                      onChange={(event) => setGridPointDraft(event.target.value)}
-                      onBlur={commitGridPoints}
+                      list="fft-size-options"
+                      value={fftSizeDraft}
+                      onChange={(event) => setFftSizeDraft(event.target.value)}
+                      onBlur={commitFftSize}
                       onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
                         if (event.key === 'Enter') {
-                          commitGridPoints()
+                          commitFftSize()
                         }
                         if (event.key === 'Escape') {
-                          setIsEditingGridPoints(false)
-                          setGridPointDraft('')
+                          setIsEditingFftSize(false)
+                          setFftSizeDraft('')
                         }
                       }}
                     />
                   ) : (
                     <button
                       type="button"
-                      aria-label="Edit grid points"
+                      aria-label="Edit FFT size"
                       className="metric-inline-value"
-                      onDoubleClick={startGridPointsEdit}
+                      onDoubleClick={startFftSizeEdit}
                     >
-                      {state.gridPointCount}
+                      {state.fftSize}
                     </button>
                   )}
+                  <datalist id="fft-size-options">
+                    {FFT_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option} />
+                    ))}
+                  </datalist>
                 </div>
               </article>
               <article>

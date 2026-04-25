@@ -6,7 +6,8 @@ import {
   useMemo,
   useReducer,
 } from 'react'
-import { DEFAULT_GRID_SIZE, createFlatCurve } from './lib/curve'
+import { createFlatCurve } from './lib/curve'
+import { DEFAULT_FFT_SIZE } from './lib/audio-monitor'
 import type { CurvePoint, EqBand, EqEditorState } from './types'
 
 type EqEditorAction =
@@ -22,7 +23,7 @@ type EqEditorAction =
   | { type: 'set-monitor-baseline-enabled'; payload: boolean }
   | { type: 'set-view-max-db'; payload: number }
   | { type: 'set-view-min-db'; payload: number }
-  | { type: 'set-grid-point-count'; payload: number }
+  | { type: 'set-fft-size'; payload: number }
   | { type: 'set-pre-gain-mode'; payload: 'auto' | 'manual' }
   | { type: 'set-manual-pre-gain-db'; payload: number }
   | { type: 'set-visual-gain-db'; payload: number }
@@ -38,7 +39,7 @@ const initialState: EqEditorState = {
   monitorBaselineEnabled: false,
   viewMaxDb: 15,
   viewMinDb: -15,
-  gridPointCount: DEFAULT_GRID_SIZE,
+  fftSize: DEFAULT_FFT_SIZE,
   preGainMode: 'auto',
   manualPreGainDb: -8,
   visualGainDb: 30,
@@ -64,7 +65,6 @@ function eqEditorReducer(
       return {
         ...state,
         baselineCurve: action.payload,
-        gridPointCount: action.payload.length,
       }
     case 'set-bands':
       return {
@@ -119,10 +119,10 @@ function eqEditorReducer(
         ...state,
         viewMinDb: action.payload,
       }
-    case 'set-grid-point-count':
+    case 'set-fft-size':
       return {
         ...state,
-        gridPointCount: action.payload,
+        fftSize: action.payload,
       }
     case 'set-pre-gain-mode':
       return {

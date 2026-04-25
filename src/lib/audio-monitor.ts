@@ -6,7 +6,8 @@ const CUT_Q = Math.SQRT1_2
 const GRAPH_EQ_Q = 4.318
 export const FFT_ANALYSER_MIN_DB = -96
 export const FFT_ANALYSER_MAX_DB = 0
-const FFT_ANALYSER_SIZE = 8192
+export const DEFAULT_FFT_SIZE = 8192
+export const FFT_SIZE_OPTIONS = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768] as const
 const FFT_ANALYSER_SMOOTHING = 0.82
 const FFT_OVERLAY_GRID_SIZE = 1024
 const GRAPH_EQ_CENTERS = [
@@ -113,8 +114,8 @@ function dbToLinear(db: number) {
   return 10 ** (db / 20)
 }
 
-function configureAnalyser(analyser: AnalyserNode) {
-  analyser.fftSize = FFT_ANALYSER_SIZE
+function configureAnalyser(analyser: AnalyserNode, fftSize = DEFAULT_FFT_SIZE) {
+  analyser.fftSize = fftSize
   analyser.minDecibels = FFT_ANALYSER_MIN_DB
   analyser.maxDecibels = FFT_ANALYSER_MAX_DB
   analyser.smoothingTimeConstant = FFT_ANALYSER_SMOOTHING
@@ -398,6 +399,7 @@ export function createGraphEqNodes(
 export function createMonitorGraph(
   context: AudioContext,
   audioElement: HTMLAudioElement,
+  fftSize = DEFAULT_FFT_SIZE,
 ) {
   const source = context.createMediaElementSource(audioElement)
   const dryGain = context.createGain()
@@ -407,8 +409,8 @@ export function createMonitorGraph(
   const preAnalyser = context.createAnalyser()
   const postAnalyser = context.createAnalyser()
 
-  configureAnalyser(preAnalyser)
-  configureAnalyser(postAnalyser)
+  configureAnalyser(preAnalyser, fftSize)
+  configureAnalyser(postAnalyser, fftSize)
 
   source.connect(dryGain)
   dryGain.connect(context.destination)
@@ -438,6 +440,7 @@ export function syncMonitorGraph(
   monitorBypassed: boolean,
   monitorBaselineEnabled: boolean,
   preGainDb: number,
+  fftSize: number,
 ) {
   const shouldApplyEq = !monitorBypassed
   const baselineDescriptors =
@@ -450,6 +453,8 @@ export function syncMonitorGraph(
         .flatMap((band) => createBandDescriptors(band))
     : []
   const filterDescriptors = [...baselineDescriptors, ...paramDescriptors]
+  configureAnalyser(graph.preAnalyser, fftSize)
+  configureAnalyser(graph.postAnalyser, fftSize)
   const structureChanged = !haveSameFilterStructure(
     graph.filterDescriptors,
     filterDescriptors,
@@ -555,6 +560,7 @@ export function useEqPlaybackMonitor({
   monitorBypassed,
   monitorBaselineEnabled,
   preGainDb,
+  fftSize = DEFAULT_FFT_SIZE,
 }: {
   audioElement: HTMLAudioElement | null
   bands: EqBand[]
@@ -562,6 +568,7 @@ export function useEqPlaybackMonitor({
   monitorBypassed: boolean
   monitorBaselineEnabled: boolean
   preGainDb: number
+  fftSize?: number
 }) {
   const audioContextRef = useRef<AudioContext | null>(null)
   const graphRef = useRef<MonitorGraph | null>(null)
@@ -683,7 +690,7 @@ export function useEqPlaybackMonitor({
       }
 
       const context = audioContextRef.current ?? new ContextConstructor()
-      const graph = createMonitorGraph(context, audioElement)
+      const graph = createMonitorGraph(context, audioElement, fftSize)
 
       audioContextRef.current = context
       graphRef.current = graph
@@ -698,6 +705,7 @@ export function useEqPlaybackMonitor({
         monitorBypassed,
         monitorBaselineEnabled,
         preGainDb,
+        fftSize,
       )
 
       const resumeContext = () => {
@@ -736,9 +744,10 @@ export function useEqPlaybackMonitor({
       monitorBypassed,
       monitorBaselineEnabled,
       preGainDb,
+      fftSize,
     )
     setErrorMessage(null)
-  }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed, preGainDb])
+  }, [bands, baselineCurve, monitorBaselineEnabled, monitorBypassed, preGainDb, fftSize])
 
   useEffect(() => {
     isDisposedRef.current = false
