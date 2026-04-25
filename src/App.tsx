@@ -419,39 +419,40 @@ function EditorShell() {
         <aside className="panel panel-monitor">
           <section className="panel-section">
             <p className="section-label">Monitor</p>
+            <div className="monitor-toggle-row">
+              <button
+                type="button"
+                className={`chip-button ${state.monitorBaselineEnabled ? 'is-active' : ''}`}
+                aria-pressed={state.monitorBaselineEnabled}
+                disabled={!state.sourceFileName}
+                onClick={() => dispatch({ type: 'toggle-monitor-baseline' })}
+              >
+                Baseline monitor
+              </button>
+              <button
+                type="button"
+                className={`chip-button ${state.monitorBypassed ? 'is-active' : ''}`}
+                aria-pressed={state.monitorBypassed}
+                disabled={!state.audioFileName}
+                onClick={() => dispatch({ type: 'toggle-monitor-bypass' })}
+              >
+                Monitor bypass
+              </button>
+            </div>
             <div className="monitor-stack">
-              <div className="monitor-actions">
-                <button type="button" className="ghost-button" onClick={handleAudioUploadClick}>
-                  Upload audio
-                </button>
-                <button
-                  type="button"
-                  className={`chip-button ${state.monitorBaselineEnabled ? 'is-active' : ''}`}
-                  aria-pressed={state.monitorBaselineEnabled}
-                  disabled={!state.sourceFileName}
-                  onClick={() => dispatch({ type: 'toggle-monitor-baseline' })}
-                >
-                  Baseline monitor
-                </button>
-                <button
-                  type="button"
-                  className={`chip-button ${state.monitorBypassed ? 'is-active' : ''}`}
-                  aria-pressed={state.monitorBypassed}
-                  disabled={!state.audioFileName}
-                  onClick={() => dispatch({ type: 'toggle-monitor-bypass' })}
-                >
-                  Monitor bypass
-                </button>
-              </div>
-
-              <div className="monitor-card">
+              <button
+                type="button"
+                className="monitor-card monitor-card-button"
+                aria-label="Upload monitor audio"
+                onClick={handleAudioUploadClick}
+              >
                 <strong>{state.audioFileName ?? 'No monitor file loaded'}</strong>
                 <p>
                   {state.audioFileName
-                    ? 'Play the file below to hear the current EQ in real time.'
-                    : 'Upload a local audio file to audition the current curve.'}
+                    ? 'Click here to upload another monitor audio file.'
+                    : 'Click here to upload monitor audio.'}
                 </p>
-              </div>
+              </button>
 
               <audio
                 ref={setAudioElement}

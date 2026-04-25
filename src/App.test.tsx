@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 describe('App grid points', () => {
@@ -46,5 +46,46 @@ describe('App grid points', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Edit grid points').textContent).toBe('3')
     })
+  })
+})
+
+describe('App monitor controls', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders monitor toggle controls and removes the standalone upload button', () => {
+    render(<App />)
+
+    expect(screen.getByRole('button', { name: 'Baseline monitor' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Monitor bypass' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Upload audio' })).toBeNull()
+  })
+
+  it('opens audio file input when monitor title card is clicked', async () => {
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    const audioInput = document.querySelector(
+      'input[type="file"][accept="audio/*,.wav,.mp3,.m4a,.aac,.ogg,.flac"]',
+    ) as HTMLInputElement | null
+
+    expect(audioInput).toBeTruthy()
+
+    const clickSpy = vi.spyOn(audioInput as HTMLInputElement, 'click')
+
+    await user.click(screen.getByRole('button', { name: 'Upload monitor audio' }))
+
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses native audio controls for the monitor player', () => {
+    render(<App />)
+
+    expect(document.querySelector('audio.monitor-player[controls]')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Play' })).toBeNull()
+    expect(screen.queryByLabelText('Monitor position')).toBeNull()
+    expect(screen.queryByLabelText('Monitor volume')).toBeNull()
   })
 })
