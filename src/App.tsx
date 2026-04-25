@@ -74,12 +74,13 @@ function clampPlaybackRatio(value: number) {
 function EditorShell() {
   const curveInputRef = useRef<HTMLInputElement | null>(null)
   const audioInputRef = useRef<HTMLInputElement | null>(null)
+  const volumePopoverRef = useRef<HTMLDivElement | null>(null)
+  const volumePopoverTriggerRef = useRef<HTMLButtonElement | null>(null)
   const presetHandleRef = useRef<FileSystemFileHandle | null>(null)
   const exportHandlesRef = useRef(new Map<string, FileSystemFileHandle | null>())
   const audioObjectUrlRef = useRef<string | null>(null)
   const nextToastIdRef = useRef(0)
   const lastMonitorErrorRef = useRef<string | null>(null)
-  const lastAudibleVolumeRef = useRef(1)
   const { state, dispatch } = useEqEditor()
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -87,6 +88,7 @@ function EditorShell() {
   const [currentTimeSec, setCurrentTimeSec] = useState(0)
   const [volume, setVolume] = useState(1)
   const [isMuted, setIsMuted] = useState(false)
+  const [isVolumePopoverOpen, setIsVolumePopoverOpen] = useState(false)
   const [isSeeking, setIsSeeking] = useState(false)
   const [seekRatio, setSeekRatio] = useState(0)
   const [toasts, setToasts] = useState<ToastNotice[]>([])
@@ -336,9 +338,9 @@ function EditorShell() {
       setCurrentTimeSec(0)
       setVolume(1)
       setIsMuted(false)
+      setIsVolumePopoverOpen(false)
       setIsSeeking(false)
       setSeekRatio(0)
-      lastAudibleVolumeRef.current = 1
       return
     }
 
@@ -356,9 +358,6 @@ function EditorShell() {
       const nextVolume = audio.volume
       setVolume(nextVolume)
       setIsMuted(audio.muted || nextVolume === 0)
-      if (nextVolume > 0) {
-        lastAudibleVolumeRef.current = nextVolume
-      }
     }
 
     function handlePlay() {
@@ -397,6 +396,49 @@ function EditorShell() {
       audio.removeEventListener('volumechange', syncVolume)
     }
   }, [audioElement])
+
+  useEffect(() => {
+    if (!state.audioFileName) {
+      setIsVolumePopoverOpen(false)
+    }
+  }, [state.audioFileName])
+
+  useEffect(() => {
+    if (!isVolumePopoverOpen) {
+      return
+    }
+
+    function handleGlobalMouseDown(event: MouseEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+
+      if (
+        volumePopoverRef.current?.contains(target) ||
+        volumePopoverTriggerRef.current?.contains(target)
+      ) {
+        return
+      }
+
+      setIsVolumePopoverOpen(false)
+    }
+
+    function handleGlobalKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      setIsVolumePopoverOpen(false)
+    }
+
+    window.addEventListener('mousedown', handleGlobalMouseDown)
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', handleGlobalMouseDown)
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+    }
+  }, [isVolumePopoverOpen])
 
   function updateBand(nextBand: EqBand, mode: BandUpdateMode) {
     const currentBand = state.bands.find((band) => band.id === nextBand.id)
@@ -490,28 +532,10 @@ function EditorShell() {
     audioElement.muted = normalizedVolume === 0
     setVolume(normalizedVolume)
     setIsMuted(audioElement.muted)
-    if (normalizedVolume > 0) {
-      lastAudibleVolumeRef.current = normalizedVolume
-    }
   }
 
-  function handleMuteToggle() {
-    if (!audioElement) {
-      return
-    }
-
-    if (audioElement.muted || audioElement.volume === 0) {
-      const restoredVolume =
-        audioElement.volume > 0 ? audioElement.volume : lastAudibleVolumeRef.current
-      audioElement.volume = restoredVolume
-      audioElement.muted = false
-      setVolume(restoredVolume)
-      setIsMuted(false)
-      return
-    }
-
-    audioElement.muted = true
-    setIsMuted(true)
+  function handleVolumePopoverToggle() {
+    setIsVolumePopoverOpen((previous) => !previous)
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -930,39 +954,55 @@ function EditorShell() {
                 <span className="monitor-time">
                   {formatPlaybackTime(displayedCurrentTimeSec)}
                 </span>
-                <button
-                  type="button"
-                  className="monitor-control-button"
-                  aria-label={isMuted ? 'Unmute' : 'Mute'}
-                  onClick={handleMuteToggle}
-                  disabled={!state.audioFileName}
-                >
-                  {isMuted ? (
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path d="M4 9v6h4l5 4V5L8 9H4z" />
-                      <path d="m16.3 8.3-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3 2.3-2.3-1.4-1.4-2.3 2.3-2.3-2.3z" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path d="M4 9v6h4l5 4V5L8 9H4z" />
-                      <path d="M16 8.4v2.1c.7.4 1 1 1 1.5s-.3 1.1-1 1.5v2.1c1.9-.7 3-2 3-3.6s-1.1-2.9-3-3.6z" />
-                      <path d="M16 4.5v2c2.7.9 4.5 3 4.5 5.5S18.7 16.6 16 17.5v2c3.8-1 6.5-3.9 6.5-7.5S19.8 5.5 16 4.5z" />
-                    </svg>
-                  )}
-                </button>
-                <label className="monitor-range-field monitor-volume-field">
-                  <span className="sr-only">Monitor volume</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={volume}
-                    aria-label="Monitor volume"
-                    disabled={!audioElement}
-                    onChange={(event) => handleVolumeChange(Number(event.target.value))}
-                  />
-                </label>
+                <div className="monitor-volume-anchor">
+                  <button
+                    ref={volumePopoverTriggerRef}
+                    type="button"
+                    className={`monitor-control-button ${isVolumePopoverOpen ? 'is-open' : ''}`}
+                    aria-label="Adjust volume"
+                    aria-haspopup="dialog"
+                    aria-expanded={isVolumePopoverOpen}
+                    aria-controls="monitor-volume-popover"
+                    onClick={handleVolumePopoverToggle}
+                    disabled={!state.audioFileName}
+                  >
+                    {isMuted ? (
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M4 9v6h4l5 4V5L8 9H4z" />
+                        <path d="m16.3 8.3-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3 2.3-2.3-1.4-1.4-2.3 2.3-2.3-2.3z" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M4 9v6h4l5 4V5L8 9H4z" />
+                        <path d="M16 8.4v2.1c.7.4 1 1 1 1.5s-.3 1.1-1 1.5v2.1c1.9-.7 3-2 3-3.6s-1.1-2.9-3-3.6z" />
+                        <path d="M16 4.5v2c2.7.9 4.5 3 4.5 5.5S18.7 16.6 16 17.5v2c3.8-1 6.5-3.9 6.5-7.5S19.8 5.5 16 4.5z" />
+                      </svg>
+                    )}
+                  </button>
+                  {isVolumePopoverOpen ? (
+                    <div
+                      ref={volumePopoverRef}
+                      id="monitor-volume-popover"
+                      className="monitor-volume-popover"
+                      role="dialog"
+                      aria-label="Adjust monitor volume"
+                    >
+                      <label className="monitor-range-field monitor-volume-popover-field">
+                        <span className="sr-only">Monitor volume</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.01"
+                          value={volume}
+                          aria-label="Monitor volume"
+                          disabled={!audioElement}
+                          onChange={(event) => handleVolumeChange(Number(event.target.value))}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </section>

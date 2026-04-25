@@ -394,7 +394,7 @@
 
 .monitor-controls {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto minmax(4rem, 0.32fr);
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.35rem;
   min-height: 2.5rem;
@@ -437,9 +437,40 @@
   background: rgba(255, 205, 98, 0.08);
 }
 
+.monitor-control-button.is-open {
+  border-color: rgba(255, 205, 98, 0.28);
+  background: rgba(255, 205, 98, 0.08);
+}
+
 .monitor-control-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.monitor-volume-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.monitor-volume-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.45rem);
+  width: 8.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(7, 11, 16, 0.96);
+  box-shadow: 0 0.8rem 1.65rem rgba(0, 0, 0, 0.28);
+  z-index: 30;
+}
+
+.monitor-volume-popover-field {
+  width: 100%;
+}
+
+.monitor-volume-popover-field input {
+  margin: 0;
 }
 
 .monitor-range-field {
@@ -1051,6 +1082,11 @@
   .band-popover.is-left,
   .band-popover.is-right {
     transform: translate(-50%, 1rem);
+  }
+
+  .monitor-volume-popover {
+    right: -0.2rem;
+    width: min(9rem, calc(100vw - 3rem));
   }
 }
 

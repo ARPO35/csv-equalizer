@@ -250,8 +250,9 @@ describe('App monitor controls', () => {
     expect(audio).toBeTruthy()
     expect(audio?.hasAttribute('controls')).toBe(false)
     expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Adjust volume' })).toBeTruthy()
     expect(screen.getByLabelText('Monitor position')).toBeTruthy()
-    expect(screen.getByLabelText('Monitor volume')).toBeTruthy()
+    expect(screen.queryByLabelText('Monitor volume')).toBeNull()
   })
 
   it('plays through the custom monitor button', async () => {
@@ -303,20 +304,44 @@ describe('App monitor controls', () => {
     expect(screen.getByText('00:00')).toBeTruthy()
   })
 
-  it('updates custom monitor volume and mute state', async () => {
+  it('opens volume popover and updates monitor volume state', async () => {
     const user = userEvent.setup()
 
     render(<App />)
     importMonitorAudio()
 
     const audio = document.querySelector('audio.monitor-player') as HTMLAudioElement
+    const volumeButton = screen.getByRole('button', { name: 'Adjust volume' })
+    await user.click(volumeButton)
+
     const volumeSlider = screen.getByLabelText('Monitor volume')
 
     fireEvent.change(volumeSlider, { target: { value: '0.4' } })
     expect(audio.volume).toBe(0.4)
     expect(audio.muted).toBe(false)
 
-    await user.click(screen.getByRole('button', { name: 'Mute' }))
+    fireEvent.change(volumeSlider, { target: { value: '0' } })
+    expect(audio.volume).toBe(0)
     expect(audio.muted).toBe(true)
+  })
+
+  it('closes the volume popover on outside click and Escape', async () => {
+    const user = userEvent.setup()
+
+    render(<App />)
+    importMonitorAudio()
+
+    const volumeButton = screen.getByRole('button', { name: 'Adjust volume' })
+    await user.click(volumeButton)
+    expect(screen.getByRole('dialog', { name: 'Adjust monitor volume' })).toBeTruthy()
+
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole('dialog', { name: 'Adjust monitor volume' })).toBeNull()
+
+    await user.click(volumeButton)
+    expect(screen.getByRole('dialog', { name: 'Adjust monitor volume' })).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Adjust monitor volume' })).toBeNull()
   })
 })
