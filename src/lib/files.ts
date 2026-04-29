@@ -1,6 +1,6 @@
 import type { CurvePoint, ProjectPresetV1 } from '../types'
 
-type SaveFilePickerOptions = {
+type SaveTextFileOptions = {
   suggestedName: string
   mimeType: string
   contents: string
@@ -34,6 +34,36 @@ function downloadTextFile(
   URL.revokeObjectURL(url)
 }
 
+function getSavePickerOptions({
+  suggestedName,
+  mimeType,
+  description,
+  extensions,
+}: Omit<SaveTextFileOptions, 'contents' | 'handle'>): SaveFilePickerOptions {
+  return {
+    suggestedName,
+    types: [
+      {
+        description: description ?? mimeType,
+        accept: {
+          [mimeType]:
+            extensions ??
+            [suggestedName.endsWith('.json') ? '.json' : '.csv'],
+        },
+      },
+    ],
+  }
+}
+
+async function writeTextFile(
+  fileHandle: FileSystemFileHandle,
+  contents: string,
+) {
+  const writable = await fileHandle.createWritable()
+  await writable.write(contents)
+  await writable.close()
+}
+
 export function serializeCurveCsv(points: CurvePoint[]) {
   return [
     'frequency,gain',
@@ -55,27 +85,33 @@ export async function saveTextFile({
   handle,
   description,
   extensions,
-}: SaveFilePickerOptions): Promise<SaveTextFileResult> {
+}: SaveTextFileOptions): Promise<SaveTextFileResult> {
   if (window.showSaveFilePicker) {
+    const pickerOptions = getSavePickerOptions({
+      suggestedName,
+      mimeType,
+      description,
+      extensions,
+    })
     const fileHandle =
       handle ??
-      (await window.showSaveFilePicker({
-        suggestedName,
-        types: [
-          {
-            description: description ?? mimeType,
-            accept: {
-              [mimeType]:
-                extensions ??
-                [suggestedName.endsWith('.json') ? '.json' : '.csv'],
-            },
-          },
-        ],
-      }))
+      (await window.showSaveFilePicker(pickerOptions))
 
-    const writable = await fileHandle.createWritable()
-    await writable.write(contents)
-    await writable.close()
+    try {
+      await writeTextFile(fileHandle, contents)
+    } catch (error) {
+      if (!handle) {
+        throw error
+      }
+
+      const nextFileHandle = await window.showSaveFilePicker(pickerOptions)
+      await writeTextFile(nextFileHandle, contents)
+      return {
+        handle: nextFileHandle,
+        mode: 'picker',
+      }
+    }
+
     return {
       handle: fileHandle,
       mode: 'picker',

@@ -74,6 +74,76 @@ describe('saveTextFile', () => {
     expect(result.handle).toBe(handle)
   })
 
+  it('uses a provided file handle without opening the picker', async () => {
+    const write = vi.fn().mockResolvedValue(undefined)
+    const close = vi.fn().mockResolvedValue(undefined)
+    const createWritable = vi.fn().mockResolvedValue({ write, close })
+    const handle = { createWritable } as unknown as FileSystemFileHandle
+
+    Object.defineProperty(window, 'showSaveFilePicker', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    })
+
+    const result = await saveTextFile({
+      suggestedName: 'curve.csv',
+      mimeType: 'text/csv',
+      contents: 'frequency,gain\n20,0',
+      handle,
+    })
+
+    expect(window.showSaveFilePicker).not.toHaveBeenCalled()
+    expect(write).toHaveBeenCalledWith('frequency,gain\n20,0')
+    expect(result.mode).toBe('picker')
+    expect(result.handle).toBe(handle)
+  })
+
+  it('asks for a new picker handle when a provided file handle is stale', async () => {
+    const staleError = new Error(
+      'An operation that depends on state cached in an interface object was made but the state had changed since it was read from disk.',
+    )
+    const staleCreateWritable = vi.fn().mockRejectedValue(staleError)
+    const staleHandle = {
+      createWritable: staleCreateWritable,
+    } as unknown as FileSystemFileHandle
+    const write = vi.fn().mockResolvedValue(undefined)
+    const close = vi.fn().mockResolvedValue(undefined)
+    const createWritable = vi.fn().mockResolvedValue({ write, close })
+    const nextHandle = { createWritable } as unknown as FileSystemFileHandle
+
+    Object.defineProperty(window, 'showSaveFilePicker', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockResolvedValue(nextHandle),
+    })
+
+    const result = await saveTextFile({
+      suggestedName: 'curve.csv',
+      mimeType: 'text/csv',
+      description: 'CSV',
+      extensions: ['.csv'],
+      contents: 'frequency,gain\n20,0',
+      handle: staleHandle,
+    })
+
+    expect(staleCreateWritable).toHaveBeenCalled()
+    expect(window.showSaveFilePicker).toHaveBeenCalledWith({
+      suggestedName: 'curve.csv',
+      types: [
+        {
+          description: 'CSV',
+          accept: {
+            'text/csv': ['.csv'],
+          },
+        },
+      ],
+    })
+    expect(write).toHaveBeenCalledWith('frequency,gain\n20,0')
+    expect(result.mode).toBe('picker')
+    expect(result.handle).toBe(nextHandle)
+  })
+
   it('falls back to browser download when the picker is unavailable', async () => {
     Object.defineProperty(window, 'showSaveFilePicker', {
       configurable: true,
