@@ -172,6 +172,84 @@ describe('App', () => {
     })
   })
 
+  it('defers export precision clamping until the input is committed', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Export output' }))
+    const input = screen.getByLabelText(
+      'Precision (x-axis points)',
+    ) as HTMLInputElement
+
+    await user.clear(input)
+    await user.type(input, '1')
+    expect(input.value).toBe('1')
+
+    await user.tab()
+    expect(input.value).toBe('16')
+
+    await user.click(input)
+    await user.clear(input)
+    await user.type(input, '256')
+    await user.tab()
+    expect(input.value).toBe('256')
+  })
+
+  it('commits focused export precision before exporting', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Export output' }))
+    const input = screen.getByLabelText(
+      'Precision (x-axis points)',
+    ) as HTMLInputElement
+
+    await user.clear(input)
+    await user.type(input, '1')
+    await user.click(screen.getByRole('button', { name: 'Export' }))
+
+    await waitFor(() => {
+      expect(saveTextFile).toHaveBeenCalled()
+    })
+    const contents = vi.mocked(saveTextFile).mock.calls[0]?.[0].contents
+    expect(contents.trim().split('\n')).toHaveLength(17)
+  })
+
+  it('exports csv with the committed 1024 point precision', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    importCsvBaseline()
+    await waitFor(() => {
+      expect(screen.getByText('Imported EQ CSV: baseline.csv')).toBeTruthy()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Export output' }))
+    const input = screen.getByLabelText(
+      'Precision (x-axis points)',
+    ) as HTMLInputElement
+
+    await user.clear(input)
+    await user.type(input, '1024')
+    await user.click(screen.getByRole('button', { name: 'Export' }))
+
+    await waitFor(() => {
+      expect(saveTextFile).toHaveBeenCalled()
+    })
+    const contents = vi.mocked(saveTextFile).mock.calls[0]?.[0].contents
+    expect(contents.trim().split('\n')).toHaveLength(1025)
+  })
+
   it('keeps the export dialog above the selected node popover', async () => {
     const user = userEvent.setup()
     render(<App />)

@@ -74,6 +74,16 @@ function clampPlaybackRatio(value: number) {
   return Math.min(1000, Math.max(0, value))
 }
 
+const EXPORT_POINT_COUNT_MIN = 16
+const EXPORT_POINT_COUNT_MAX = 8192
+
+function clampExportPointCount(value: number) {
+  return Math.min(
+    EXPORT_POINT_COUNT_MAX,
+    Math.max(EXPORT_POINT_COUNT_MIN, Math.round(value)),
+  )
+}
+
 function getMonitorSliderStyle(fillPercent: number) {
   const normalizedPercent = Number.isFinite(fillPercent)
     ? Math.min(100, Math.max(0, fillPercent))
@@ -125,6 +135,9 @@ function EditorShell() {
     exportFormats[0]
   const [exportPointCount, setExportPointCount] = useState(
     () => selectedExportFormat?.defaultPointCount ?? 512,
+  )
+  const [exportPointCountDraft, setExportPointCountDraft] = useState(() =>
+    String(selectedExportFormat?.defaultPointCount ?? 512),
   )
   const [exportAlignment, setExportAlignment] =
     useState<ExportAlignment>('current')
@@ -681,8 +694,30 @@ function EditorShell() {
       return
     }
 
-    setExportPointCount(selectedExportFormat.defaultPointCount ?? outputCurve.length)
+    const nextPointCount =
+      selectedExportFormat.defaultPointCount ?? outputCurve.length
+    setExportPointCount(nextPointCount)
+    setExportPointCountDraft(String(nextPointCount))
     setIsExportDialogOpen(true)
+  }
+
+  function commitExportPointCount() {
+    const draft = exportPointCountDraft.trim()
+    const nextValue = Number(draft)
+    if (
+      !selectedExportFormat ||
+      selectedExportFormat.frequencyMode === 'fixed' ||
+      !draft ||
+      !Number.isFinite(nextValue)
+    ) {
+      setExportPointCountDraft(String(exportPointCount))
+      return exportPointCount
+    }
+
+    const nextPointCount = clampExportPointCount(nextValue)
+    setExportPointCount(nextPointCount)
+    setExportPointCountDraft(String(nextPointCount))
+    return nextPointCount
   }
 
   async function handleExportCurve() {
@@ -690,6 +725,8 @@ function EditorShell() {
       pushToast('error', 'No export formats are configured.')
       return
     }
+
+    const committedExportPointCount = commitExportPointCount()
 
     try {
       const targetOutputCurve = sumCurveWithEq(
@@ -701,7 +738,7 @@ function EditorShell() {
       )
       const frequencies = getExportFrequencies(
         selectedExportFormat,
-        exportPointCount,
+        committedExportPointCount,
       )
       const exportCurve = prepareExportCurve({
         sourceCurve: targetOutputCurve,
@@ -837,9 +874,10 @@ function EditorShell() {
                       return
                     }
                     setSelectedExportFormatId(nextFormat.id)
-                    setExportPointCount(
-                      nextFormat.defaultPointCount ?? outputCurve.length,
-                    )
+                    const nextPointCount =
+                      nextFormat.defaultPointCount ?? outputCurve.length
+                    setExportPointCount(nextPointCount)
+                    setExportPointCountDraft(String(nextPointCount))
                   }}
                 >
                   {exportFormats.map((format) => (
@@ -860,14 +898,18 @@ function EditorShell() {
                   step={1}
                   value={
                     selectedExportFormat.frequencyMode === 'fixed'
-                      ? (selectedExportFormat.fixedFrequencies?.length ?? 0)
-                      : exportPointCount
+                      ? String(selectedExportFormat.fixedFrequencies?.length ?? 0)
+                      : exportPointCountDraft
                   }
                   disabled={selectedExportFormat.frequencyMode === 'fixed'}
-                  onChange={(event) => {
-                    const nextValue = Math.round(Number(event.target.value))
-                    if (!Number.isNaN(nextValue)) {
-                      setExportPointCount(Math.min(8192, Math.max(16, nextValue)))
+                  onChange={(event) => setExportPointCountDraft(event.target.value)}
+                  onBlur={commitExportPointCount}
+                  onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
+                    if (event.key === 'Enter') {
+                      commitExportPointCount()
+                    }
+                    if (event.key === 'Escape') {
+                      setExportPointCountDraft(String(exportPointCount))
                     }
                   }}
                 />
